@@ -4,14 +4,14 @@ class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
 
   // ========== INVOICE OPERATIONS ==========
-  
+
   Future<List<Map<String, dynamic>>> getInvoices() async {
     try {
       final response = await _client
           .from('invoices')
           .select('*')
           .order('created_at', ascending: false);
-      
+
       return _processInvoices(List<Map<String, dynamic>>.from(response));
     } catch (e) {
       throw Exception('Failed to fetch invoices: $e');
@@ -20,12 +20,9 @@ class SupabaseService {
 
   Future<Map<String, dynamic>> getInvoiceById(String id) async {
     try {
-      final response = await _client
-          .from('invoices')
-          .select('*')
-          .eq('id', id)
-          .single();
-      
+      final response =
+          await _client.from('invoices').select('*').eq('id', id).single();
+
       return _processInvoice(response);
     } catch (e) {
       throw Exception('Failed to fetch invoice: $e');
@@ -39,11 +36,51 @@ class SupabaseService {
           .select('*')
           .order('created_at', ascending: false)
           .limit(limit);
-      
+
       return _processInvoices(List<Map<String, dynamic>>.from(response));
     } catch (e) {
       throw Exception('Failed to fetch recent invoices: $e');
     }
+  }
+
+  Future<String> generateInvoiceNumber() async {
+    final now = DateTime.now();
+    final yearCode = '${now.year % 100}${(now.year + 1) % 100}'
+        .padLeft(4, '0');
+    final prefix = 'HP-$yearCode-';
+
+    final existing = await _client
+        .from('invoices')
+        .select('id')
+        .ilike('id', '$prefix%')
+        .order('id', ascending: false)
+        .limit(1);
+
+    int nextNumber = 1;
+    if (existing.isNotEmpty) {
+      final latestId = existing.first['id']?.toString() ?? '';
+      final tail = latestId.split('-').last;
+      nextNumber = (int.tryParse(tail) ?? 0) + 1;
+    }
+
+    return '$prefix${nextNumber.toString().padLeft(3, '0')}';
+  }
+
+  Future<void> markInvoiceAsPaid(String id) async {
+    await updateInvoiceStatus(id, 'PAID');
+    await recalculateBalanceSummary();
+  }
+
+  Future<void> duplicateInvoice(String id) async {
+    final source = await getInvoiceById(id);
+    final newId = await generateInvoiceNumber();
+    final duplicate = Map<String, dynamic>.from(source)
+      ..['id'] = newId
+      ..['status'] = 'DRAFT'
+      ..['created_at'] = DateTime.now().toIso8601String()
+      ..['updated_at'] = DateTime.now().toIso8601String();
+
+    await createInvoice(duplicate);
   }
 
   List<Map<String, dynamic>> _processInvoices(List<Map<String, dynamic>> invoices) {
@@ -51,9 +88,8 @@ class SupabaseService {
   }
 
   Map<String, dynamic> _processInvoice(Map<String, dynamic> invoice) {
-    // Convert all numeric values to double consistently
     final processed = Map<String, dynamic>.from(invoice);
-    
+
     if (processed['amount'] != null) {
       processed['amount'] = _toDouble(processed['amount']);
     }
@@ -63,8 +99,7 @@ class SupabaseService {
     if (processed['tax'] != null) {
       processed['tax'] = _toDouble(processed['tax']);
     }
-    
-    // Process items if they exist
+
     if (processed['items'] != null && processed['items'] is List) {
       processed['items'] = (processed['items'] as List).map((item) {
         final processedItem = Map<String, dynamic>.from(item);
@@ -74,10 +109,13 @@ class SupabaseService {
         if (processedItem['quantity'] != null) {
           processedItem['quantity'] = _toInt(processedItem['quantity']);
         }
+        final quantity = _toDouble(processedItem['quantity']);
+        final rate = _toDouble(processedItem['rate']);
+        processedItem['amount'] = quantity * rate;
         return processedItem;
       }).toList();
     }
-    
+
     return processed;
   }
 
@@ -154,11 +192,12 @@ class SupabaseService {
     try {
       await _client
           .from('invoices')
-          .update({
-            'status': status,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
+          .update({'status': status, 'updated_at': DateTime.now().toIso8601String()})
           .eq('id', id);
+
+      if (status.toUpperCase() == 'PAID') {
+        await recalculateBalanceSummary();
+      }
     } catch (e) {
       throw Exception('Failed to update invoice status: $e');
     }
@@ -167,14 +206,43 @@ class SupabaseService {
   Future<void> deleteInvoice(String id) async {
     try {
       final invoice = await getInvoiceById(id);
-      
+
       await _client.from('invoices').delete().eq('id', id);
-      
+
       if (invoice['client_id'] != null) {
         await _updateClientStats(invoice['client_id']);
       }
+      await recalculateBalanceSummary();
     } catch (e) {
       throw Exception('Failed to delete invoice: $e');
+    }
+  }
+
+  Future<void> recalculateBalanceSummary() async {
+    try {
+      final paidInvoices =
+          await _client.from('invoices').select('amount').eq('status', 'PAID');
+      final totalEarnings = paidInvoices.fold<double>(
+        0,
+        (sum, inv) => sum + _toDouble(inv['amount']),
+      );
+
+      final existing = await _client
+          .from('balance_summary')
+          .select('id,total_expenses')
+          .limit(1)
+          .maybeSingle();
+
+      if (existing == null) return;
+      final totalExpenses = _toDouble(existing['total_expenses']);
+
+      await _client.from('balance_summary').update({
+        'total_earnings': totalEarnings,
+        'balance': totalEarnings - totalExpenses,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', existing['id']);
+    } catch (_) {
+      // balance_summary is optional in some environments.
     }
   }
 
@@ -182,85 +250,18 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getClients() async {
     try {
-      final response = await _client
-          .from('clients')
-          .select('*')
-          .order('name');
-      
+      final response = await _client.from('clients').select('*').order('name');
+
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       throw Exception('Failed to fetch clients: $e');
     }
   }
 
-  Future<Map<String, dynamic>> getClientById(String id) async {
-    try {
-      final response = await _client
-          .from('clients')
-          .select('*')
-          .eq('id', id)
-          .single();
-      
-      return response;
-    } catch (e) {
-      throw Exception('Failed to fetch client: $e');
-    }
-  }
-
-  Future<void> createClient(Map<String, dynamic> clientData) async {
-    try {
-      await _client.from('clients').insert({
-        'name': clientData['name'],
-        'email': clientData['email'],
-        'phone': clientData['phone'],
-        'address': clientData['address'],
-        'payment_terms': clientData['payment_terms'] ?? 'net30',
-        'contact_name': clientData['contact_name'] ?? '',
-        'company': clientData['company'],
-        'total_invoices': 0,
-        'total_amount': 0,
-        'created_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      throw Exception('Failed to create client: $e');
-    }
-  }
-
-  Future<void> updateClient(String id, Map<String, dynamic> clientData) async {
-    try {
-      await _client
-          .from('clients')
-          .update({
-            'name': clientData['name'],
-            'email': clientData['email'],
-            'phone': clientData['phone'],
-            'address': clientData['address'],
-            'payment_terms': clientData['payment_terms'],
-            'contact_name': clientData['contact_name'],
-            'company': clientData['company'],
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', id);
-    } catch (e) {
-      throw Exception('Failed to update client: $e');
-    }
-  }
-
-  Future<void> deleteClient(String id) async {
-    try {
-      await _client.from('clients').delete().eq('id', id);
-    } catch (e) {
-      throw Exception('Failed to delete client: $e');
-    }
-  }
-
   Future<void> _updateClientStats(String clientId) async {
     try {
-      final invoices = await _client
-          .from('invoices')
-          .select('amount')
-          .eq('client_id', clientId);
+      final invoices =
+          await _client.from('invoices').select('amount').eq('client_id', clientId);
 
       double totalAmount = 0;
       for (var inv in invoices) {
@@ -285,14 +286,14 @@ class SupabaseService {
   Future<Map<String, dynamic>> getDashboardStats() async {
     try {
       final invoices = await getInvoices();
-      
+
       double totalRevenue = 0;
       double paidRevenue = 0;
       int pendingCount = 0;
       int overdueCount = 0;
       int paidCount = 0;
       int draftCount = 0;
-      
+
       final now = DateTime.now();
       int invoicesThisMonth = 0;
 
@@ -302,12 +303,12 @@ class SupabaseService {
         final dateIssued = DateTime.parse(invoice['date_issued']);
 
         totalRevenue += amount;
-        
+
         if (dateIssued.month == now.month && dateIssued.year == now.year) {
           invoicesThisMonth++;
         }
 
-        switch(status) {
+        switch (status) {
           case 'PAID':
             paidRevenue += amount;
             paidCount++;
@@ -337,47 +338,6 @@ class SupabaseService {
       };
     } catch (e) {
       throw Exception('Failed to get dashboard stats: $e');
-    }
-  }
-
-  // ========== SETTINGS OPERATIONS ==========
-
-  Future<Map<String, dynamic>?> getSettings(String userId) async {
-    try {
-      final response = await _client
-          .from('settings')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-      
-      return response;
-    } catch (e) {
-      throw Exception('Failed to fetch settings: $e');
-    }
-  }
-
-  Future<void> updateSettings(String userId, Map<String, dynamic> settingsData) async {
-    try {
-      final existing = await getSettings(userId);
-      
-      if (existing == null) {
-        await _client.from('settings').insert({
-          'user_id': userId,
-          ...settingsData,
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        });
-      } else {
-        await _client
-            .from('settings')
-            .update({
-              ...settingsData,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('user_id', userId);
-      }
-    } catch (e) {
-      throw Exception('Failed to update settings: $e');
     }
   }
 }

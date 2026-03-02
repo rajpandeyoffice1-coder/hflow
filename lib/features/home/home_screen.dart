@@ -47,6 +47,13 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, double> analyticsData = {};
   Map<String, double> clientRevenue = {};
   Map<String, double> monthlyTrend = {};
+  Map<String, double> previousPeriodSummary = {
+    'balance': 0,
+    'income': 0,
+    'expenses': 0,
+  };
+  double expectedIncome = 0;
+  List<String> _lastSixMonthLabels = [];
 
   bool isLoading = true;
   String userName = "Raj";
@@ -57,20 +64,7 @@ class _HomeScreenState extends State<HomeScreen>
   String _selectedTrend = "Monthly";
   final List<String> _trendOptions = ["Daily", "Monthly", "Yearly"];
 
-  final List<String> _months = [
-    "Mar 2025",
-    "Apr 2025",
-    "May 2025",
-    "Jun 2025",
-    "Jul 2025",
-    "Aug 2025",
-    "Sep 2025",
-    "Oct 2025",
-    "Nov 2025",
-    "Dec 2025",
-    "Jan 2026",
-    "Feb 2026",
-  ];
+  List<String> _months = [];
 
   List<double> _incomeData = List.filled(12, 0);
   List<double> _expenseData = List.filled(12, 0);
@@ -144,7 +138,7 @@ class _HomeScreenState extends State<HomeScreen>
           .from('invoices')
           .select('id, client_name, amount, date_issued, status, client_id')
           .order('date_issued', ascending: false)
-          .limit(5);
+          .limit(10);
 
       final expensesData = await supabase
           .from('expenses')
@@ -169,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen>
 
       final now = DateTime.now();
       final firstDayOfMonth = DateTime(now.year, now.month, 1);
+      final firstDayOfPreviousMonth = DateTime(now.year, now.month - 1, 1);
 
       final monthlyIncome = await supabase
           .from('invoices')
@@ -181,6 +176,36 @@ class _HomeScreenState extends State<HomeScreen>
           .select('amount')
           .gte('date_incurred', firstDayOfMonth.toIso8601String());
 
+      final previousMonthIncome = await supabase
+          .from('invoices')
+          .select('amount')
+          .gte('date_issued', firstDayOfPreviousMonth.toIso8601String())
+          .lt('date_issued', firstDayOfMonth.toIso8601String())
+          .eq('status', 'Paid');
+
+      final previousMonthExpenses = await supabase
+          .from('expenses')
+          .select('amount')
+          .gte('date_incurred', firstDayOfPreviousMonth.toIso8601String())
+          .lt('date_incurred', firstDayOfMonth.toIso8601String());
+
+      final expectedIncomeInvoices = await supabase
+          .from('invoices')
+          .select('amount, status')
+          .inFilter('status', ['Pending', 'Draft']);
+
+      final chartStartMonth = DateTime(now.year, now.month - 5, 1);
+      final paidInvoicesForCharts = await supabase
+          .from('invoices')
+          .select('amount, date_issued, status')
+          .gte('date_issued', chartStartMonth.toIso8601String())
+          .eq('status', 'Paid');
+
+      final expensesForCharts = await supabase
+          .from('expenses')
+          .select('amount, date_incurred')
+          .gte('date_incurred', chartStartMonth.toIso8601String());
+
       double incomeSum = 0;
       for (var inv in monthlyIncome) {
         incomeSum += (inv['amount'] as num).toDouble();
@@ -191,14 +216,55 @@ class _HomeScreenState extends State<HomeScreen>
         expenseSum += (exp['amount'] as num).toDouble();
       }
 
-      for (int i = 0; i < 6; i++) {
-        if (i < invoices.length) {
-          _incomeData[5 - i] = (invoices[i]['amount'] as num).toDouble();
+      double previousIncomeSum = 0;
+      for (var inv in previousMonthIncome) {
+        previousIncomeSum += (inv['amount'] as num).toDouble();
+      }
+
+      double previousExpenseSum = 0;
+      for (var exp in previousMonthExpenses) {
+        previousExpenseSum += (exp['amount'] as num).toDouble();
+      }
+
+      double expectedIncomeAmount = 0;
+      for (var inv in expectedIncomeInvoices) {
+        expectedIncomeAmount += (inv['amount'] as num).toDouble();
+      }
+
+      final monthLabels = List<String>.generate(6, (index) {
+        final month = DateTime(chartStartMonth.year, chartStartMonth.month + index, 1);
+        return DateFormat('MMM').format(month);
+      });
+      final monthlyIncomeSeries = List<double>.filled(6, 0);
+      final monthlyExpenseSeries = List<double>.filled(6, 0);
+
+      for (var invoice in paidInvoicesForCharts) {
+        final issuedDate = DateTime.parse(invoice['date_issued']);
+        final monthIndex = (issuedDate.year - chartStartMonth.year) * 12 +
+            issuedDate.month -
+            chartStartMonth.month;
+        if (monthIndex >= 0 && monthIndex < 6) {
+          monthlyIncomeSeries[monthIndex] +=
+              (invoice['amount'] as num).toDouble();
         }
       }
 
-      for (int i = 0; i < 3 && i < expensesData.length; i++) {
-        _expenseData[5 - i] = (expensesData[i]['amount'] as num).toDouble();
+      for (var expense in expensesForCharts) {
+        final incurredDate = DateTime.parse(expense['date_incurred']);
+        final monthIndex = (incurredDate.year - chartStartMonth.year) * 12 +
+            incurredDate.month -
+            chartStartMonth.month;
+        if (monthIndex >= 0 && monthIndex < 6) {
+          monthlyExpenseSeries[monthIndex] +=
+              (expense['amount'] as num).toDouble();
+        }
+      }
+
+      _incomeData = List<double>.filled(12, 0);
+      _expenseData = List<double>.filled(12, 0);
+      for (int i = 0; i < 6; i++) {
+        _incomeData[i] = monthlyIncomeSeries[i];
+        _expenseData[i] = monthlyExpenseSeries[i];
       }
 
       final List<Map<String, dynamic>> transactions = [];
@@ -230,11 +296,22 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         recentInvoices = invoices;
         expenses = expensesData;
-        recentTransactions = transactions.take(4).toList();
+        recentTransactions = transactions.take(10).toList();
         clientRevenue = {
           for (var client in clients)
             client['name']: (client['total_amount'] as num).toDouble(),
         };
+        expectedIncome = expectedIncomeAmount;
+        previousPeriodSummary = {
+          'balance': previousIncomeSum - previousExpenseSum,
+          'income': previousIncomeSum,
+          'expenses': previousExpenseSum,
+        };
+        _lastSixMonthLabels = monthLabels;
+        _months = monthLabels;
+        balanceSummary['current_balance'] = incomeSum - expenseSum;
+        balanceSummary['total_earnings'] = incomeSum;
+        balanceSummary['total_expenses'] = expenseSum;
         isLoading = false;
       });
     } catch (e) {
@@ -383,7 +460,7 @@ class _HomeScreenState extends State<HomeScreen>
         children: [
           const SizedBox(height: 10),
           Text(
-            "Good afternoon, ${userName.split('@')[0]}",
+            "${_timeBasedGreeting()}, ${userName.split('@')[0]}!",
             style: const TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -391,9 +468,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            "Here’s your financial overview",
-            style: TextStyle(color: Colors.white54),
+          Text(
+            DateFormat('EEEE, MMM d, y').format(DateTime.now()),
+            style: const TextStyle(color: Colors.white54),
           ),
           const SizedBox(height: 20),
           _overviewSection(),
@@ -406,6 +483,8 @@ class _HomeScreenState extends State<HomeScreen>
               color: Colors.white,
             ),
           ),
+          const SizedBox(height: 12),
+          _quickActionButtons(),
           const SizedBox(height: 12),
           _quickActionsGrid(),
           const SizedBox(height: 22),
@@ -435,8 +514,6 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _overviewContent() {
     return Column(
       children: [
-        _summaryCards(),
-        const SizedBox(height: 22),
         _monthlyTrendSection(),
         const SizedBox(height: 22),
         _incomeExpenseReport(),
@@ -504,6 +581,7 @@ class _HomeScreenState extends State<HomeScreen>
                       tx['title'],
                       tx['subtitle'],
                       tx['amount'],
+                      DateFormat('dd MMM y').format(tx['date'] as DateTime),
                       isExpense: tx['isExpense'],
                     ),
                   ),
@@ -606,7 +684,7 @@ class _HomeScreenState extends State<HomeScreen>
       filtered.sort((a, b) => b['date'].compareTo(a['date']));
 
       setState(() {
-        recentTransactions = filtered.take(4).toList();
+        recentTransactions = filtered.take(10).toList();
         isLoading = false;
       });
     } catch (e) {
@@ -618,7 +696,8 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _transactionTile(
     String title,
     String subtitle,
-    String amount, {
+    String amount,
+    String date, {
     bool isExpense = false,
   }) {
     return Row(
@@ -655,6 +734,11 @@ class _HomeScreenState extends State<HomeScreen>
               Text(
                 subtitle,
                 style: const TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                date,
+                style: const TextStyle(fontSize: 11, color: Colors.white38),
               ),
             ],
           ),
@@ -724,7 +808,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            "₹${NumberFormat('#,##0').format(_getTotalIncome())}",
+            "₹${NumberFormat('#,##0').format(expectedIncome)}",
             style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
@@ -792,14 +876,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  double _getTotalIncome() {
-    double total = 0;
-    for (var inv in recentInvoices) {
-      total += (inv['amount'] as num).toDouble();
-    }
-    return total;
-  }
-
   double _getMaxChartValue() {
     double max = 0;
     for (var spot in _getChartData()) {
@@ -809,43 +885,10 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<FlSpot> _getChartData() {
-    switch (_selectedFilterAnalytic) {
-      case "Week":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 1000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 2000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 1500),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 2500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 1800),
-          FlSpot(5, _incomeData.length > 5 ? _incomeData[5] : 3000),
-          FlSpot(6, _incomeData.length > 6 ? _incomeData[6] : 2800),
-        ];
-      case "Month":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 2000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 3000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 4000),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 3500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 5000),
-        ];
-      case "Year":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 4000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 6000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 7500),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 7000),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 8500),
-        ];
-      default:
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 1000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 2000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 3000),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 2500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 5000),
-          FlSpot(5, _incomeData.length > 5 ? _incomeData[5] : 7500),
-        ];
-    }
+    return List.generate(
+      6,
+      (index) => FlSpot(index.toDouble(), _incomeData[index]),
+    );
   }
 
   Widget _monthlyTrendSection() {
@@ -935,18 +978,10 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        const months = [
-                          "Jan",
-                          "Feb",
-                          "Mar",
-                          "Apr",
-                          "May",
-                          "Jun",
-                        ];
                         int index = value.toInt();
-                        if (index < months.length) {
+                        if (index < _lastSixMonthLabels.length) {
                           return Text(
-                            months[index],
+                            _lastSixMonthLabels[index],
                             style: const TextStyle(
                               color: Colors.white54,
                               fontSize: 11,
@@ -964,14 +999,7 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-                barGroups: [
-                  _barData(0, _incomeData.isNotEmpty ? _incomeData[0] : 5000),
-                  _barData(1, _incomeData.length > 1 ? _incomeData[1] : 7000),
-                  _barData(2, _incomeData.length > 2 ? _incomeData[2] : 6000),
-                  _barData(3, _incomeData.length > 3 ? _incomeData[3] : 8500),
-                  _barData(4, _incomeData.length > 4 ? _incomeData[4] : 7500),
-                  _barData(5, _incomeData.length > 5 ? _incomeData[5] : 9200),
-                ],
+                barGroups: List.generate(6, (index) => _barData(index, _incomeData[index])),
               ),
             ),
           ),
@@ -1116,7 +1144,7 @@ class _HomeScreenState extends State<HomeScreen>
               Icon(Icons.bar_chart_rounded, color: Colors.white70, size: 20),
               SizedBox(width: 8),
               Text(
-                "Income vs Expenses Report",
+                "Income vs Expenses (Last 6 Months)",
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
@@ -1198,7 +1226,7 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-                barGroups: List.generate(12, (index) {
+                barGroups: List.generate(6, (index) {
                   return BarChartGroupData(
                     x: index,
                     barsSpace: 6,
@@ -1238,7 +1266,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _getMaxIncomeExpenseValue() {
     double max = 0;
-    for (int i = 0; i < 12; i++) {
+    for (int i = 0; i < 6; i++) {
       if (_incomeData[i] > max) max = _incomeData[i];
       if (_expenseData[i] > max) max = _expenseData[i];
     }
@@ -1246,50 +1274,44 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _summaryCards() {
-    double totalIncome = balanceSummary['total_earnings']?.toDouble() ?? 0;
-    double totalExpenses = balanceSummary['total_expenses']?.toDouble() ?? 0;
-    double currentBalance = balanceSummary['current_balance']?.toDouble() ?? 0;
-    double profitMargin = totalIncome > 0
-        ? (currentBalance / totalIncome) * 100
-        : 0;
+    final income = (balanceSummary['total_earnings'] as num?)?.toDouble() ?? 0;
+    final totalExpenses =
+        (balanceSummary['total_expenses'] as num?)?.toDouble() ?? 0;
+    final balance = income - totalExpenses;
 
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(totalIncome)}",
-                label: "Total Income",
-                color: Colors.greenAccent,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(totalExpenses)}",
-                label: "Total Expenses",
-                color: Colors.redAccent,
+              child: _overviewCard(
+                "Balance",
+                "₹${NumberFormat('#,##0').format(balance)}",
+                _formatChange(balance, previousPeriodSummary['balance'] ?? 0),
+                isLarge: true,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(currentBalance)}",
-                label: "Net Profit",
-                color: Colors.blueAccent,
+              child: _overviewCard(
+                "Income",
+                "₹${NumberFormat('#,##0').format(income)}",
+                _formatChange(income, previousPeriodSummary['income'] ?? 0),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
-              child: _squareStatCard(
-                value: "${profitMargin.toStringAsFixed(1)}%",
-                label: "Profit Margin",
-                color: Colors.purpleAccent,
+              child: _overviewCard(
+                "Expenses",
+                "₹${NumberFormat('#,##0').format(totalExpenses)}",
+                _formatChange(
+                  totalExpenses,
+                  previousPeriodSummary['expenses'] ?? 0,
+                ),
               ),
             ),
           ],
@@ -1609,24 +1631,49 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _overviewSection() {
-    double balance = balanceSummary['current_balance']?.toDouble() ?? 800000;
-    double income = balanceSummary['total_earnings']?.toDouble() ?? 1250000;
-    double expenses = balanceSummary['total_expenses']?.toDouble() ?? 450000;
-    double netProfit = income - expenses;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _netBalanceCard(balance, income, expenses, netProfit),
-        const SizedBox(height: 20),
+        _summaryCards(),
+        const SizedBox(height: 16),
+        _glassCard(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "Expected Income",
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              Text(
+                "₹${NumberFormat('#,##0').format(expectedIncome)}",
+                style: const TextStyle(
+                  color: Colors.greenAccent,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
+                ),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }
 
-  String _calculateChange(double value) {
-    if (value > 10000) return '12';
-    if (value > 5000) return '8';
-    return '4';
+  String _timeBasedGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  }
+
+  String _formatChange(double current, double previous) {
+    if (previous == 0) {
+      if (current == 0) return '0.0%';
+      return '+100.0%';
+    }
+    final change = ((current - previous) / previous) * 100;
+    final sign = change >= 0 ? '+' : '';
+    return '$sign${change.toStringAsFixed(1)}%';
   }
 
   Widget _overviewCard(
@@ -2067,6 +2114,48 @@ class _HomeScreenState extends State<HomeScreen>
         border: Border.all(color: Colors.white.withOpacity(0.15)),
       ),
       child: Icon(icon, size: 16, color: color),
+    );
+  }
+
+  Widget _quickActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CreateInvoiceScreen()),
+              ).then((_) => loadDashboardData());
+            },
+            icon: const Icon(Icons.receipt_long),
+            label: const Text('New Invoice'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF22C55E),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ExpenseScreen()),
+              ).then((_) => loadDashboardData());
+            },
+            icon: const Icon(Icons.add_card_rounded),
+            label: const Text('New Expense'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -1138,13 +1138,13 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                         72, // Account for padding
                   ),
                   child: DataTable(
-                    headingRowColor: MaterialStateProperty.all(
+                    headingRowColor: WidgetStateProperty.all(
                       Colors.white.withOpacity(0.1),
                     ),
-                    dataRowColor: MaterialStateProperty.resolveWith<Color?>((
-                      Set<MaterialState> states,
+                    dataRowColor: WidgetStateProperty.resolveWith<Color?>((
+                      Set<WidgetState> states,
                     ) {
-                      if (states.contains(MaterialState.selected)) {
+                      if (states.contains(WidgetState.selected)) {
                         return Colors.white.withOpacity(0.15);
                       }
                       return Colors.transparent;

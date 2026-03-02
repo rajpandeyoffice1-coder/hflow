@@ -239,7 +239,7 @@ class _GlassToggleTile extends StatelessWidget {
             Switch(
               value: value,
               onChanged: onChanged,
-              activeColor: const Color(0xFF5B8CFF),
+              activeThumbColor: const Color(0xFF5B8CFF),
             ),
           ],
         ),

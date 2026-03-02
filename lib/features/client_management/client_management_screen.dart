@@ -7,7 +7,7 @@ import '../../models/client_model.dart';
 import '../../core/widgets/client_journey_widget.dart';
 
 class ClientManagementScreen extends StatefulWidget {
-  const ClientManagementScreen({Key? key}) : super(key: key);
+  const ClientManagementScreen({super.key});
 
   @override
   State<ClientManagementScreen> createState() => _ClientManagementScreenState();
@@ -436,7 +436,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
     required Color color,
     required IconData icon,
   }) {
-    return Container(
+    return SizedBox(
       width: 140,
       child: _GlassContainer(
         child: Column(

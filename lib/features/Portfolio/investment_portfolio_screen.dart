@@ -42,7 +42,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   DateTime _calendarCurrentMonth = DateTime.now();
   
   // Selected investments for bulk actions
-  Set<String> _selectedInvestmentIds = {};
+  final Set<String> _selectedInvestmentIds = {};
 
   @override
   void initState() {
@@ -387,7 +387,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
           indicatorSize: TabBarIndicatorSize.tab,
           dividerColor: Colors.transparent,
           splashFactory: NoSplash.splashFactory,
-          overlayColor: MaterialStateProperty.all(Colors.transparent),
+          overlayColor: WidgetStateProperty.all(Colors.transparent),
           labelPadding: EdgeInsets.zero,
           indicator: BoxDecoration(
             color: const Color(0xFF5B8CFF),
@@ -633,7 +633,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               ),
             )
           else
-            ...goals.map((goal) => _buildGoalItem(goal)).toList(),
+            ...goals.map((goal) => _buildGoalItem(goal)),
         ],
       ),
     );
@@ -967,7 +967,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                 ],
               ),
             );
-          }).toList(),
+          }),
         ],
       ),
     );
@@ -1361,7 +1361,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               ),
               const SizedBox(width: 12),
               Text(
-                'Showing ${filteredCount} items',
+                'Showing $filteredCount items',
                 style: const TextStyle(color: Colors.white54, fontSize: 12),
               ),
             ],
@@ -1508,8 +1508,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                       }
                     });
                   },
-                  fillColor: MaterialStateProperty.resolveWith((states) {
-                    if (states.contains(MaterialState.selected)) {
+                  fillColor: WidgetStateProperty.resolveWith((states) {
+                    if (states.contains(WidgetState.selected)) {
                       return const Color(0xFF5B8CFF);
                     }
                     return Colors.white.withOpacity(0.1);
@@ -1652,8 +1652,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                           }
                         });
                       },
-                      fillColor: MaterialStateProperty.resolveWith((states) {
-                        if (states.contains(MaterialState.selected)) {
+                      fillColor: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.selected)) {
                           return const Color(0xFF5B8CFF);
                         }
                         return Colors.white.withOpacity(0.1);
@@ -1704,7 +1704,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                 ),
               ],
             );
-          }).toList(),
+          }),
         ],
       ),
     );
@@ -2810,7 +2810,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                       ],
                     ),
                   );
-                }).toList(),
+                }),
               ],
             ],
           ),

@@ -1359,7 +1359,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                     ],
                   ),
                 );
-              }).toList(),
+              }),
             ],
           ),
         ),
@@ -2307,8 +2307,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: MaterialStateProperty.all(const Color(0xFF111827)),
-            dataRowColor: MaterialStateProperty.all(Colors.transparent),
+            headingRowColor: WidgetStateProperty.all(const Color(0xFF111827)),
+            dataRowColor: WidgetStateProperty.all(Colors.transparent),
             columnSpacing: 30,
             headingTextStyle: const TextStyle(
               color: Colors.white70,
@@ -2906,8 +2906,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           child: Checkbox(
             value: value,
             onChanged: onChanged,
-            fillColor: MaterialStateProperty.resolveWith((states) {
-              if (states.contains(MaterialState.selected)) {
+            fillColor: WidgetStateProperty.resolveWith((states) {
+              if (states.contains(WidgetState.selected)) {
                 return const Color(0xFF5B8CFF);
               }
               return Colors.white.withOpacity(0.15);

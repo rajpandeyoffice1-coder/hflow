@@ -72,7 +72,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               trailing: Switch(
                                 value: false,
                                 onChanged: (_) {},
-                                activeColor:
+                                activeThumbColor:
                                     const Color(0xFF5B8CFF),
                               ),
                             ),
@@ -101,7 +101,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 value: expenseAlerts,
                                 onChanged: (v) => setState(
                                     () => expenseAlerts = v),
-                                activeColor:
+                                activeThumbColor:
                                     const Color(0xFF5B8CFF),
                               ),
                             ),
@@ -116,7 +116,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 value: promotions,
                                 onChanged: (v) => setState(
                                     () => promotions = v),
-                                activeColor:
+                                activeThumbColor:
                                     const Color(0xFF5B8CFF),
                               ),
                             ),
@@ -135,7 +135,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 value: biometric,
                                 onChanged: (v) => setState(
                                     () => biometric = v),
-                                activeColor:
+                                activeThumbColor:
                                     const Color(0xFF5B8CFF),
                               ),
                             ),

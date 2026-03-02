@@ -286,7 +286,7 @@ class InvestmentDetailModal extends StatelessWidget {
               ],
             ),
           );
-        }).toList(),
+        }),
       ],
     );
   }

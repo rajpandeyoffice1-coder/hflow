@@ -1303,7 +1303,7 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
                       ),
                     ),
                   );
-                }).toList(),
+                }),
               const SizedBox(height: 8),
               if (items.isNotEmpty)
                 GestureDetector(

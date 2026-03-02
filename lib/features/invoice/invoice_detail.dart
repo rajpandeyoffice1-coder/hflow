@@ -365,7 +365,7 @@ class InvoiceDetailScreen extends StatelessWidget {
                     ],
                   ),
                 );
-              }).toList(),
+              }),
             ],
           ),
         ),

@@ -9,10 +9,10 @@ class ClientJourneyWidget extends StatelessWidget {
   final List<Map<String, dynamic>> timeline;
 
   const ClientJourneyWidget({
-    Key? key,
+    super.key,
     required this.client,
     required this.timeline,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -186,7 +186,7 @@ class ClientJourneyWidget extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            currencyFormat.format(amount).replaceAll('₹', '') + 'k',
+                            '${currencyFormat.format(amount).replaceAll('₹', '')}k',
                             style: const TextStyle(
                               color: Colors.white70,
                               fontSize: 10,

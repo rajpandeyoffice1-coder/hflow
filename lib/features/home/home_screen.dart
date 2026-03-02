@@ -72,8 +72,8 @@ class _HomeScreenState extends State<HomeScreen>
     "Feb 2026",
   ];
 
-  List<double> _incomeData = List.filled(12, 0);
-  List<double> _expenseData = List.filled(12, 0);
+  final List<double> _incomeData = List.filled(12, 0);
+  final List<double> _expenseData = List.filled(12, 0);
 
   int _selectedSegmentIndex = 0;
   late TabController _segmentTabController;
@@ -508,7 +508,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 )
-                .toList(),
+                ,
         ],
       ),
     );
@@ -1390,10 +1390,10 @@ class _HomeScreenState extends State<HomeScreen>
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  headingRowColor: MaterialStateProperty.all(
+                  headingRowColor: WidgetStateProperty.all(
                     Colors.white.withOpacity(0.1),
                   ),
-                  dataRowColor: MaterialStateProperty.all(Colors.transparent),
+                  dataRowColor: WidgetStateProperty.all(Colors.transparent),
                   headingTextStyle: const TextStyle(
                     color: Colors.white70,
                     fontWeight: FontWeight.w600,

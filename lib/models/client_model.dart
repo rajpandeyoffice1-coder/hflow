@@ -118,7 +118,7 @@ class ClientModel {
           try {
             invoiceDate = DateTime.parse(invoice['date_issued'].toString());
             if (lastInvoiceDate == null || 
-                (invoiceDate != null && invoiceDate.isAfter(lastInvoiceDate!))) {
+                (invoiceDate.isAfter(lastInvoiceDate))) {
               lastInvoiceDate = invoiceDate;
             }
           } catch (e) {}
@@ -128,7 +128,7 @@ class ClientModel {
           paidAmount += amount;
           paidInvoices++;
           if (invoiceDate != null && 
-              (lastPaymentDate == null || invoiceDate.isAfter(lastPaymentDate!))) {
+              (lastPaymentDate == null || invoiceDate.isAfter(lastPaymentDate))) {
             lastPaymentDate = invoiceDate;
           }
         } else if (status == 'pending') {

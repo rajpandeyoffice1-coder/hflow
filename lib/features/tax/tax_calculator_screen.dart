@@ -1237,7 +1237,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: selectedType,
+                initialValue: selectedType,
                 dropdownColor: const Color(0xFF1E1E2E),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
@@ -2031,7 +2031,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                 ),
               ),
             )
-            .toList(),
+            ,
         const Divider(color: Colors.white10, height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2168,7 +2168,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                 ),
               ),
             )
-            .toList(),
+            ,
         const Divider(color: Colors.white10, height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,

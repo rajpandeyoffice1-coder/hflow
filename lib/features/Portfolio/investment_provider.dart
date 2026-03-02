@@ -354,13 +354,15 @@ class InvestmentProvider extends ChangeNotifier {
   Color getCategoryColor(String category) {
     if (category.contains('Mutual')) return const Color(0xFF5B8CFF);
     if (category.contains('Stock')) return const Color(0xFF10B981);
-    if (category.contains('FD') || category.contains('Fixed'))
+    if (category.contains('FD') || category.contains('Fixed')) {
       return const Color(0xFFF97316);
+    }
     if (category.contains('Gold')) return const Color(0xFFEAB308);
     if (category.contains('Real Estate')) return const Color(0xFF9333EA);
     if (category.contains('Crypto')) return const Color(0xFFEF4444);
-    if (category.contains('PPF') || category.contains('EPF'))
+    if (category.contains('PPF') || category.contains('EPF')) {
       return const Color(0xFF8B5CF6);
+    }
     return const Color(0xFF64748B);
   }
 

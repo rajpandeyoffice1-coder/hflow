@@ -13,7 +13,7 @@ class SupabaseService {
         .select()
         .eq('user_id', userId);
 
-    return response as List<Map<String, dynamic>>;
+    return response;
   }
 
   Future<List<Map<String, dynamic>>> getSubCategories() async {
@@ -22,7 +22,7 @@ class SupabaseService {
         .select()
         .eq('user_id', userId);
 
-    return response as List<Map<String, dynamic>>;
+    return response;
   }
 
   // Investments
@@ -33,7 +33,7 @@ class SupabaseService {
         .eq('user_id', userId)
         .order('date', ascending: false);
 
-    return response as List<Map<String, dynamic>>;
+    return response;
   }
 
   Future<void> addInvestment(Investment investment) async {
@@ -102,7 +102,7 @@ class SupabaseService {
         .select()
         .eq('user_id', userId);
 
-    return response as List<Map<String, dynamic>>;
+    return response;
   }
 
   Future<List<Redemption>> getAllRedemptions() async {

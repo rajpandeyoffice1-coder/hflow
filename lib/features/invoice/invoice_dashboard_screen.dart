@@ -630,7 +630,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
             scrollDirection: Axis.horizontal,
             child: DataTable(
               columnSpacing: 28,
-              headingRowColor: MaterialStateProperty.all(
+              headingRowColor: WidgetStateProperty.all(
                 Colors.white.withOpacity(0.06),
               ),
               dataRowHeight: 56,

@@ -195,8 +195,15 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
   }
 
   void _createInvoice(ClientModel client) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CreateInvoiceScreen()));
-    _snack('Open invoice form and select ${client.name}.');
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CreateInvoiceScreen(
+          preselectedClientId: client.id,
+          preselectedClientName: client.name,
+        ),
+      ),
+    );
+    _snack('Invoice form opened for ${client.name}.');
   }
 
   void _snack(String message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));

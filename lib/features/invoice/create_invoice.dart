@@ -5,7 +5,9 @@ import 'package:hflow/features/invoice/InvoiceSupabaseService.dart';
 
 class CreateInvoiceScreen extends StatefulWidget {
   final Map<String, dynamic>? invoiceToEdit;
-  const CreateInvoiceScreen({super.key, this.invoiceToEdit});
+  final String? preselectedClientId;
+  final String? preselectedClientName;
+  const CreateInvoiceScreen({super.key, this.invoiceToEdit, this.preselectedClientId, this.preselectedClientName});
 
   @override
   State<CreateInvoiceScreen> createState() => _CreateInvoiceScreenState();
@@ -38,7 +40,12 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
     issueDate = DateTime.now();
     dueDate = DateTime.now().add(const Duration(days: 30));
     _loadClients();
-    
+
+    if (widget.preselectedClientId != null) {
+      selectedClientId = widget.preselectedClientId!;
+      selectedClientName = widget.preselectedClientName ?? '';
+    }
+
     if (widget.invoiceToEdit != null) {
       _loadInvoiceForEdit();
     } else {

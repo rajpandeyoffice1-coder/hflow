@@ -13,7 +13,6 @@ class BusinessAnalyticsScreen extends StatefulWidget {
 
 class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   static const double _headerHeight = 64;
-  bool _isLoading = true;
   bool _isRefreshing = false;
   String _selectedPeriod = '30D';
   String _selectedClient = 'All Clients';
@@ -85,7 +84,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     setState(() {
       _searchQuery = _searchController.text.toLowerCase();
       _filterClientRows();
-      _currentPage = 0; // Reset to first page on search
+      _currentPage = 0;
     });
   }
 
@@ -144,16 +143,10 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   }
 
   Future<void> _fetchAnalyticsData() async {
-    if (!_isRefreshing) {
-      setState(() {
-        _isLoading = true;
-      });
-    }
 
     try {
       final supabase = Supabase.instance.client;
 
-      // Fetch all invoices
       final invoicesResponse = await supabase
           .from('invoices')
           .select('''
@@ -169,7 +162,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
 
       _originalInvoices = List<Map<String, dynamic>>.from(invoicesResponse);
 
-      // Fetch all clients for reference
       final clientsResponse = await supabase
           .from('clients')
           .select('*')
@@ -177,7 +169,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
 
       _originalClients = List<Map<String, dynamic>>.from(clientsResponse);
 
-      // Extract unique client names for filter
       Set<String> clientNames = {};
       for (var invoice in _originalInvoices) {
         if (invoice['client_name'] != null && invoice['client_name'].toString().isNotEmpty) {
@@ -189,7 +180,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         _clients = ['All Clients', ...clientNames.toList()..sort()];
       });
 
-      // Process the data
       _processAnalyticsData(_originalInvoices);
 
     } catch (e) {
@@ -202,21 +192,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           ),
         );
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _isRefreshing = false;
-        });
-      }
     }
   }
 
   void _applyFilters() {
-    // Start with all invoices
     List<Map<String, dynamic>> filteredInvoices = List.from(_originalInvoices);
 
-    // Apply status filter
     if (_selectedStatus != 'All Status') {
       String statusFilter = _selectedStatus.replaceAll(' Only', '').toUpperCase();
       filteredInvoices = filteredInvoices.where((invoice) {
@@ -224,14 +205,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       }).toList();
     }
 
-    // Apply client filter
     if (_selectedClient != 'All Clients') {
       filteredInvoices = filteredInvoices.where((invoice) {
         return (invoice['client_name'] as String?) == _selectedClient;
       }).toList();
     }
 
-    // Apply period filter
     DateTime now = DateTime.now();
     if (_selectedPeriod != 'All') {
       filteredInvoices = filteredInvoices.where((invoice) {
@@ -254,28 +233,23 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       }).toList();
     }
 
-    // Process the filtered data
     _processAnalyticsData(filteredInvoices);
   }
 
   void _processAnalyticsData(List<Map<String, dynamic>> invoices) {
-    // Reset data
     totalRevenue = 0;
     monthlyRevenue = {};
     Map<String, Map<String, dynamic>> clientStats = {};
     maxMonthlyRevenue = 0;
 
-    // Process each invoice
     for (var invoice in invoices) {
       double amount = (invoice['amount'] ?? 0).toDouble();
       String clientName = invoice['client_name'] ?? 'Unknown';
       String status = invoice['status'] ?? 'DRAFT';
       String dateIssued = invoice['date_issued'] ?? '';
 
-      // Add to total revenue
       totalRevenue += amount;
 
-      // Update client stats
       if (!clientStats.containsKey(clientName)) {
         clientStats[clientName] = {
           'name': clientName,
@@ -292,7 +266,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       clientStats[clientName]!['invoices'] =
           (clientStats[clientName]!['invoices'] as int) + 1;
 
-      // Track latest invoice date
       if (dateIssued.isNotEmpty) {
         DateTime currentLast = DateTime.tryParse(clientStats[clientName]!['lastInvoice'] ?? '') ?? DateTime(2000);
         DateTime newDate = DateTime.tryParse(dateIssued) ?? DateTime(2000);
@@ -302,7 +275,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         }
       }
 
-      // Monthly revenue for chart
       if (dateIssued.isNotEmpty) {
         try {
           DateTime date = DateTime.parse(dateIssued);
@@ -312,12 +284,10 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             maxMonthlyRevenue = monthlyRevenue[monthKey]!;
           }
         } catch (e) {
-          // Skip if date parsing fails
         }
       }
     }
 
-    // Convert client stats to list and sort by revenue
     List<Map<String, dynamic>> sortedClients = clientStats.entries.map((entry) {
       return {
         'name': entry.value['name'],
@@ -332,7 +302,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     sortedClients.sort((a, b) =>
         (b['totalRevenue'] as double).compareTo(a['totalRevenue'] as double));
 
-    // Calculate top client
     if (sortedClients.isNotEmpty) {
       topClient = sortedClients.first['name'];
       topClientRevenue = sortedClients.first['totalRevenue'];
@@ -341,10 +310,8 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           : 0;
     }
 
-    // Calculate average invoice
     averageInvoice = invoices.isNotEmpty ? totalRevenue / invoices.length : 0;
 
-    // Prepare all client rows for table
     allClientRows = sortedClients.map<Map<String, String>>((client) {
       double avgAmount = (client['invoices'] as int) > 0
           ? (client['totalRevenue'] as double) / (client['invoices'] as int)
@@ -374,10 +341,8 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       };
     }).toList();
 
-    // Apply search filter and update pagination
     _filterClientRows();
 
-    // Prepare client distribution (top 4 clients)
     clientDistribution = [];
     if (totalRevenue > 0) {
       for (var i = 0; i < sortedClients.length && i < 4; i++) {
@@ -390,19 +355,16 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       }
     }
 
-    // Calculate status counts
     paidCount = invoices.where((i) => i['status'] == 'PAID').length;
     pendingCount = invoices.where((i) => i['status'] == 'PENDING').length;
     overdueCount = invoices.where((i) => i['status'] == 'OVERDUE').length;
     draftCount = invoices.where((i) => i['status'] == 'DRAFT').length;
 
-    // Update UI
     setState(() {});
   }
 
   String _getClientEmail(String clientName) {
     try {
-      // First try to get from invoice's client relation
       for (var invoice in _originalInvoices) {
         if (invoice['client_name'] == clientName &&
             invoice['clients'] != null &&
@@ -411,7 +373,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         }
       }
 
-      // Then try from clients table
       for (var client in _originalClients) {
         if (client['name'] == clientName && client['email'] != null) {
           return client['email'];
@@ -483,7 +444,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       backgroundColor: const Color(0xFF05060A),
       body: Stack(
         children: [
-          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -493,8 +453,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
               ),
             ),
           ),
-
-          // Background blobs
           Positioned(
             top: -120,
             left: -100,
@@ -515,16 +473,8 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
               opacity: 0.26,
             ),
           ),
-
-          // Main content
           SafeArea(
-            child: _isLoading
-                ? const Center(
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF5B8CFF)),
-              ),
-            )
-                : Column(
+            child: Column(
               children: [
                 _buildHeader(),
                 Expanded(
@@ -630,7 +580,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   Widget _buildFilters() {
     return Column(
       children: [
-        // Period filters
         Row(
           children: _periods.map((period) {
             bool isSelected = period == _selectedPeriod;
@@ -647,8 +596,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           }).toList(),
         ),
         const SizedBox(height: 12),
-
-        // Dropdown filters
         Row(
           children: [
             Expanded(
@@ -704,18 +651,15 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   }
 
   Widget _buildEarningsChart() {
-    // Get last 6 months for display, but show at least 2
     List<String> months = monthlyRevenue.keys.toList()..sort();
     if (months.length > 6) {
       months = months.sublist(months.length - 6);
     }
 
-    // Ensure we have at least 2 months for display
     while (months.length < 2) {
       months.add('No Data');
     }
 
-    // Create Y-axis labels (5 steps)
     List<double> yAxisValues = [];
     if (maxMonthlyRevenue > 0) {
       for (int i = 0; i <= 5; i++) {
@@ -734,14 +678,11 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
           ),
           const SizedBox(height: 20),
-
-          // Chart
           SizedBox(
             height: 200,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                // Y-axis labels
                 SizedBox(
                   width: 60,
                   child: Column(
@@ -756,8 +697,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-
-                // Chart bars
                 Expanded(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -805,7 +744,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Client Distribution Card
         _glassCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -821,7 +759,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                     clientDistribution[index]['name'],
                     '${(clientDistribution[index]['percentage'] as double).toStringAsFixed(1)}%',
                     clientDistribution[index]['amount'],
-                    isSubItem: index == 1,
                   );
                 })
               else
@@ -829,10 +766,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             ],
           ),
         ),
-
         const SizedBox(height: 16),
-
-        // Status Breakdown Card
         _glassCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -853,18 +787,19 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     );
   }
 
-  Widget _buildClientItem(String name, String percentage, String amount, {bool isSubItem = false}) {
+  Widget _buildClientItem(String name, String percentage, String amount) {
     return Padding(
-      padding: EdgeInsets.only(left: isSubItem ? 16 : 0, bottom: 12),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         children: [
-          if (!isSubItem)
-            Container(
-              width: 8,
-              height: 8,
-              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF5B8CFF)),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Color(0xFF5B8CFF)
             ),
-          if (isSubItem) const SizedBox(width: 16),
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Column(
@@ -872,9 +807,9 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
               children: [
                 Text(
                   name,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
-                    fontWeight: isSubItem ? FontWeight.normal : FontWeight.w500,
+                    fontWeight: FontWeight.w500,
                     color: Colors.white,
                   ),
                 ),
@@ -887,7 +822,11 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           ),
           Text(
             amount,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white
+            ),
           ),
         ],
       ),
@@ -945,8 +884,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
         ),
         const SizedBox(height: 16),
-
-        // Insight cards
         Row(
           children: [
             Expanded(
@@ -977,8 +914,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             ),
           ],
         ),
-
-        // Recommendations
         const SizedBox(height: 12),
         _glassCard(
           child: Column(
@@ -1039,8 +974,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
         ),
         const SizedBox(height: 16),
-
-        // Search Bar
         Container(
           margin: const EdgeInsets.only(bottom: 16),
           decoration: BoxDecoration(
@@ -1068,209 +1001,347 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             ),
           ),
         ),
-
-        // Table
-        Container(
-          decoration: BoxDecoration(
+        Card(
+          elevation: 12,
+          shadowColor: Colors.black.withOpacity(0.6),
+          shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Colors.white.withOpacity(0.15), Colors.white.withOpacity(0.05)],
-            ),
-            border: Border.all(color: Colors.white.withOpacity(0.10)),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Column(
-                children: [
-                  // Table
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 72),
-                      child: DataTable(
-                        headingRowColor: WidgetStateProperty.all(Colors.white.withOpacity(0.1)),
-                        headingTextStyle: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
+          color: Colors.transparent,
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withOpacity(0.2),
+                  Colors.white.withOpacity(0.1),
+                ],
+              ),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 25,
+                  offset: const Offset(0, 10),
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withOpacity(0.15),
+                            Colors.white.withOpacity(0.05),
+                          ],
                         ),
-                        dataTextStyle: const TextStyle(color: Colors.white, fontSize: 12),
-                        dividerThickness: 0,
-                        columnSpacing: 24,
-                        horizontalMargin: 16,
-                        columns: const [
-                          DataColumn(label: Text('CLIENT')),
-                          DataColumn(label: Text('TOTAL REVENUE')),
-                          DataColumn(label: Text('INVOICES')),
-                          DataColumn(label: Text('AVG AMOUNT')),
-                          DataColumn(label: Text('LAST INVOICE')),
-                          DataColumn(label: Text('STATUS')),
-                          DataColumn(label: Text('ACTIONS')),
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Colors.white.withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(
+                            Icons.analytics_outlined,
+                            color: Color(0xFF5B8CFF),
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            "Client Performance Overview",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                            ),
+                          ),
                         ],
-                        rows: paginatedClientRows.isEmpty
-                            ? [
-                          DataRow(cells: [
-                            DataCell(Text('No data available',
-                                style: TextStyle(color: Colors.white.withOpacity(0.5)))),
-                            DataCell(Text('')), DataCell(Text('')), DataCell(Text('')),
-                            DataCell(Text('')), DataCell(Text('')), DataCell(Text('')),
-                          ])
-                        ]
-                            : paginatedClientRows.map((client) {
-                          return DataRow(cells: [
-                            DataCell(
-                            SizedBox(
-                            width: 180,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(
-                                  client['name']!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontWeight: FontWeight.w500),
-                                ),
-                                Text(
-                                  client['email']!,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.white.withOpacity(0.5),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          ),
-                            DataCell(
-                              SizedBox(
-                                width: 100,
-                                child: Text('₹${client['revenue']}'),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 70,
-                                child: Text(client['invoices']!),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 90,
-                                child: Text('₹${client['avgAmount']}'),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 90,
-                                child: Text(client['lastInvoice']!),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 80,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: _getStatusColor(client['status']!).withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: _getStatusColor(client['status']!).withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    client['status']!,
-                                    style: TextStyle(
-                                      color: _getStatusColor(client['status']!),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 50,
-                                child: IconButton(
-                                  icon: Icon(
-                                    Icons.more_horiz,
-                                    color: Colors.white.withOpacity(0.7),
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    _showClientDetails(client);
-                                  },
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ),
-                            ),
-                          ]);
-                        }).toList(),
                       ),
                     ),
-                  ),
-
-                  // Pagination Controls
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        top: BorderSide(color: Colors.white.withOpacity(0.1)),
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  'Rows per page:\n${_currentPage * _rowsPerPage + 1}-${(_currentPage * _rowsPerPage + paginatedClientRows.length)} of $_totalRows',
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.7),
-                                    fontSize: 12,
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                            minWidth: MediaQuery.of(context).size.width - 72
+                        ),
+                        child: DataTable(
+                          headingRowColor: WidgetStateProperty.all(
+                            const Color(0xFF2A2F3F).withOpacity(0.9),
+                          ),
+                          headingTextStyle: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                            letterSpacing: 0.5,
+                          ),
+                          dataTextStyle: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12
+                          ),
+                          dataRowColor: WidgetStateProperty.resolveWith<Color?>(
+                                (Set<WidgetState> states) {
+                              if (states.contains(WidgetState.selected)) {
+                                return Colors.white.withOpacity(0.2);
+                              }
+                              return null;
+                            },
+                          ),
+                          dividerThickness: 0,
+                          columnSpacing: 24,
+                          horizontalMargin: 16,
+                          columns: const [
+                            DataColumn(label: Text('CLIENT')),
+                            DataColumn(label: Text('TOTAL REVENUE')),
+                            DataColumn(label: Text('INVOICES')),
+                            DataColumn(label: Text('AVG AMOUNT')),
+                            DataColumn(label: Text('LAST INVOICE')),
+                            DataColumn(label: Text('STATUS')),
+                            DataColumn(label: Text('ACTIONS')),
+                          ],
+                          rows: paginatedClientRows.isEmpty
+                              ? [
+                            DataRow(
+                                color: WidgetStateProperty.all(
+                                  Colors.white.withOpacity(0.05),
+                                ),
+                                cells: [
+                                  DataCell(Text('No data available',
+                                      style: TextStyle(color: Colors.white.withOpacity(0.7)))),
+                                  DataCell(Text('')),
+                                  DataCell(Text('')),
+                                  DataCell(Text('')),
+                                  DataCell(Text('')),
+                                  DataCell(Text('')),
+                                  DataCell(Text('')),
+                                ]
+                            )
+                          ]
+                              : paginatedClientRows.asMap().entries.map((entry) {
+                            int index = entry.key;
+                            var client = entry.value;
+                            return DataRow(
+                              color: WidgetStateProperty.all(
+                                index.isEven
+                                    ? Colors.white.withOpacity(0.05)
+                                    : Colors.white.withOpacity(0.1),
+                              ),
+                              cells: [
+                                DataCell(
+                                  SizedBox(
+                                    width: 180,
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          client['name']!,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w500,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        Text(
+                                          client['email']!,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.white.withOpacity(0.6),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 8),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: DropdownButtonHideUnderline(
-                                    child: DropdownButton<int>(
-                                      value: _rowsPerPage,
-                                      dropdownColor: const Color(0xFF1A1F2E),
-                                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                                      icon: Icon(
-                                        Icons.arrow_drop_down,
-                                        color: Colors.white.withOpacity(0.7),
+                                DataCell(
+                                  SizedBox(
+                                    width: 100,
+                                    child: Text(
+                                      '₹${client['revenue']}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: Color(0xFF22C55E),
                                       ),
-                                      items: _rowsPerPageOptions.map((value) {
-                                        return DropdownMenuItem(
-                                          value: value,
-                                          child: Text(value.toString()),
-                                        );
-                                      }).toList(),
-                                      onChanged: _onRowsPerPageChanged,
                                     ),
                                   ),
                                 ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 70,
+                                    child: Text(
+                                      client['invoices']!,
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 90,
+                                    child: Text(
+                                      '₹${client['avgAmount']}',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 90,
+                                    child: Text(
+                                      client['lastInvoice']!,
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _getStatusColor(client['status']!).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: _getStatusColor(client['status']!).withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      client['status']!,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: _getStatusColor(client['status']!),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.more_horiz,
+                                      color: Colors.white.withOpacity(0.8),
+                                      size: 20,
+                                    ),
+                                    onPressed: () {
+                                      _showClientDetails(client);
+                                    },
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                ),
                               ],
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.white.withOpacity(0.08),
+                            Colors.white.withOpacity(0.03),
+                          ],
+                        ),
+                        border: Border(
+                          top: BorderSide(
+                            color: Colors.white.withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  '${_currentPage * _rowsPerPage + 1}-${(_currentPage * _rowsPerPage + paginatedClientRows.length)} of $_totalRows',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.9),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.2),
+                                  ),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<int>(
+                                    value: _rowsPerPage,
+                                    dropdownColor: const Color(0xFF1A1F2E),
+                                    style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12
+                                    ),
+                                    icon: Icon(
+                                      Icons.arrow_drop_down,
+                                      color: Colors.white.withOpacity(0.8),
+                                    ),
+                                    items: _rowsPerPageOptions.map((value) {
+                                      return DropdownMenuItem(
+                                        value: value,
+                                        child: Text(
+                                          '$value rows',
+                                          style: const TextStyle(color: Colors.white),
+                                        ),
+                                      );
+                                    }).toList(),
+                                    onChanged: _onRowsPerPageChanged,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(25),
+                              border: Border.all(
+                                color: Colors.white.withOpacity(0.2),
+                              ),
                             ),
-                            Row(
+                            child: Row(
                               children: [
                                 IconButton(
                                   icon: Icon(
@@ -1278,11 +1349,22 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                                     color: _currentPage > 0
                                         ? Colors.white
                                         : Colors.white.withOpacity(0.3),
-                                    size: 20,
+                                    size: 22,
                                   ),
                                   onPressed: _currentPage > 0 ? _previousPage : null,
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                    '${_currentPage + 1}',
+                                    style: TextStyle(
+                                      color: Colors.white.withOpacity(0.9),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                                 IconButton(
                                   icon: Icon(
@@ -1290,7 +1372,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                                     color: (_currentPage + 1) * _rowsPerPage < filteredClientRows.length
                                         ? Colors.white
                                         : Colors.white.withOpacity(0.3),
-                                    size: 20,
+                                    size: 22,
                                   ),
                                   onPressed: (_currentPage + 1) * _rowsPerPage < filteredClientRows.length
                                       ? _nextPage
@@ -1300,12 +1382,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1320,9 +1402,38 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       builder: (context) {
         return AlertDialog(
           backgroundColor: const Color(0xFF1A1F2E),
-          title: Text(
-            client['name']!,
-            style: const TextStyle(color: Colors.white),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF5B8CFF).withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.business_center,
+                    color: Color(0xFF5B8CFF),
+                    size: 20,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  client['name']!,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1339,7 +1450,10 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Close', style: TextStyle(color: Color(0xFF5B8CFF))),
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF5B8CFF),
+              ),
+              child: const Text('Close'),
             ),
           ],
         );
@@ -1349,25 +1463,29 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
 
   Widget _buildDetailRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
             width: 100,
             child: Text(
               label,
-              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 13,
+              ),
             ),
           ),
-          Text(
-            ':',
-            style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-          ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
@@ -1393,22 +1511,23 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF5B8CFF).withOpacity(0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
+          color: isSelected ? const Color(0xFF5B8CFF).withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected
-                ? const Color(0xFF5B8CFF).withOpacity(0.5)
-                : Colors.white.withOpacity(0.15),
+                ? const Color(0xFF5B8CFF).withOpacity(0.6)
+                : Colors.white.withOpacity(0.2),
+            width: isSelected ? 1.5 : 1,
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
             color: isSelected ? const Color(0xFF5B8CFF) : Colors.white70,
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
           ),
           textAlign: TextAlign.center,
         ),
@@ -1426,7 +1545,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           end: Alignment.bottomRight,
           colors: [Colors.white.withOpacity(0.15), Colors.white.withOpacity(0.05)],
         ),
-        border: Border.all(color: Colors.white.withOpacity(0.10)),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),

@@ -7,7 +7,9 @@ import 'ai_assistant_service.dart';
 import 'package:hflow/core/widgets/ai_data_display.dart';
 
 class AiAssistantScreen extends StatefulWidget {
-  const AiAssistantScreen({super.key});
+  final VoidCallback? onBack;
+
+  const AiAssistantScreen({super.key, this.onBack});
 
   @override
   State<AiAssistantScreen> createState() => _AiAssistantScreenState();
@@ -222,7 +224,9 @@ class _AiAssistantScreenState extends State<AiAssistantScreen> {
                 color: Colors.white,
               ),
               onPressed: () {
-                Navigator.of(context).pop();
+                if (widget.onBack != null) {
+                  widget.onBack!();
+                }
               },
             ),
             const Expanded(

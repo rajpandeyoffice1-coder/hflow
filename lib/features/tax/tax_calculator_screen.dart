@@ -364,74 +364,6 @@ class SupabaseService {
   }
 }
 
-Widget _premiumLoader(String message) {
-  return Center(
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-        child: Container(
-          width: 260,
-          padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withOpacity(0.18),
-                Colors.white.withOpacity(0.05),
-              ],
-            ),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.25),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.6),
-                blurRadius: 30,
-                offset: const Offset(0, 20),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                height: 32,
-                width: 32,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation(const Color(0xFF5B8CFF)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                message,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.6,
-                  decoration: TextDecoration.none,
-                  color: const Color(0xFFE0E7FF),
-                  shadows: [
-                    Shadow(
-                      color: const Color(0xFF5B8CFF).withOpacity(0.6),
-                      blurRadius: 12,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
 class ToastService {
   static void showSuccess(BuildContext context, String message) {
     _showToast(context, message, Colors.green);
@@ -498,35 +430,6 @@ class ToastService {
   }
 }
 
-class LoadingOverlay extends StatelessWidget {
-  final Widget child;
-  final bool isLoading;
-  final String? loadingMessage;
-
-  const LoadingOverlay({
-    super.key,
-    required this.child,
-    required this.isLoading,
-    this.loadingMessage,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        child,
-        if (isLoading)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black.withOpacity(0.45),
-              child: _premiumLoader(loadingMessage ?? "Saving data..."),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
 class FiscalYearSelector extends StatefulWidget {
   final String currentFiscalYear;
   final Function(String) onYearSelected;
@@ -553,12 +456,17 @@ class _FiscalYearSelectorState extends State<FiscalYearSelector> {
   }
 
   void _generateFiscalYears() {
-    int currentYear = DateTime.now().year;
+    DateTime now = DateTime.now();
+    int currentYear = now.month < 4 ? now.year - 1 : now.year;
+
+    fiscalYears = [];
+
     for (int i = 3; i >= 0; i--) {
       int startYear = currentYear - i;
       int endYear = startYear + 1;
       fiscalYears.add('$startYear-${endYear.toString().substring(2)}');
     }
+
     for (int i = 1; i <= 2; i++) {
       int startYear = currentYear + i;
       int endYear = startYear + 1;
@@ -640,13 +548,30 @@ class _FiscalYearSelectorState extends State<FiscalYearSelector> {
   }
 
   String _getYearDescription(String year) {
-    if (year == fiscalYears[3]) {
+    final fyStart = int.parse(year.split('-')[0]);
+
+    final now = DateTime.now();
+
+    // Indian FY starts from April
+    int currentFYStartYear;
+    if (now.month >= 4) {
+      currentFYStartYear = now.year;
+    } else {
+      currentFYStartYear = now.year - 1;
+    }
+
+    if (fyStart == currentFYStartYear) {
       return 'Current Financial Year';
-    } else if (year == fiscalYears[2]) {
+    }
+
+    if (fyStart == currentFYStartYear - 1) {
       return 'Previous Financial Year';
-    } else if (year == fiscalYears[4]) {
+    }
+
+    if (fyStart == currentFYStartYear + 1) {
       return 'Next Financial Year';
     }
+
     return '';
   }
 }
@@ -867,14 +792,24 @@ class TaxCalculatorScreen extends StatefulWidget {
 
 class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   static const double _headerHeight = 60;
+  String getCurrentFiscalYear() {
+    final now = DateTime.now();
+
+    int startYear;
+    if (now.month >= 4) {
+      startYear = now.year;
+    } else {
+      startYear = now.year - 1;
+    }
+
+    return '$startYear-${(startYear + 1).toString().substring(2)}';
+  }
+
   final SupabaseService _supabaseService = SupabaseService();
 
-  List<String> fiscalYears = ['2025-26', '2024-25', '2023-24', '2022-23'];
-  String selectedFiscalYear = '2025-26';
+  List<String> fiscalYears = [];
+  late String selectedFiscalYear;
 
-  bool _isLoading = false;
-  bool _isSaving = false;
-  String _loadingMessage = 'Refreshing data...';
 
   double totalEarnings = 0;
   double paidInvoices = 0;
@@ -918,6 +853,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   @override
   void initState() {
     super.initState();
+    selectedFiscalYear = getCurrentFiscalYear();
     _loadInvoiceData();
     _loadSavedData();
     _generateFiscalYears();
@@ -947,7 +883,8 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   }
 
   void _generateFiscalYears() {
-    int currentYear = DateTime.now().year;
+    DateTime now = DateTime.now();
+    int currentYear = now.month < 4 ? now.year - 1 : now.year;
     fiscalYears = [];
     for (int i = 3; i >= 0; i--) {
       int startYear = currentYear - i;
@@ -1027,10 +964,6 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   }
 
   Future<void> _loadSavedData() async {
-    setState(() {
-      _isLoading = true;
-      _loadingMessage = 'Loading data for FY $selectedFiscalYear...';
-    });
 
     try {
       final profile = await _supabaseService.getTaxProfile(selectedFiscalYear);
@@ -1095,16 +1028,10 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       ToastService.showSuccess(context, 'Data loaded for FY $selectedFiscalYear');
     } catch (e) {
       ToastService.showError(context, 'Error loading data');
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
     }
   }
 
   Future<void> _saveAllData() async {
-    setState(() => _isSaving = true);
-
     try {
       await _supabaseService.saveTaxProfile({
         'fiscal_year': selectedFiscalYear,
@@ -1155,8 +1082,6 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       ToastService.showSuccess(context, 'All data saved successfully!');
     } catch (e) {
       ToastService.showError(context, 'Error saving data');
-    } finally {
-      setState(() => _isSaving = false);
     }
   }
 
@@ -1666,10 +1591,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     double totalTaxLiability = showResults ? (newRegimeTax <= oldRegimeTax ? newRegimeTax : oldRegimeTax) : 0;
     double effectiveTaxRate = totalEarnings > 0 ? (totalTaxLiability / totalEarnings * 100) : 0;
 
-    return LoadingOverlay(
-      isLoading: _isLoading || _isSaving,
-      loadingMessage: _isLoading ? _loadingMessage : (_isSaving ? 'Saving your data...' : null),
-      child: Scaffold(
+    return Scaffold(
         backgroundColor: const Color(0xFF05060A),
         body: Stack(
           children: [
@@ -1717,8 +1639,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             ),
           ],
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildFiscalYearHeader() {

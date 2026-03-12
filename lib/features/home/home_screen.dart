@@ -241,14 +241,11 @@ class _HomeScreenState extends State<HomeScreen>
         // Get monthly aggregated data for last 6 months only
         supabase
             .from('invoices')
-            .select('amount, date_issued')
-            .eq('status', 'Paid')
-            .gte('date_issued', sixMonthsAgo.toIso8601String()),
+            .select('amount, date_issued, status'),
 
         supabase
             .from('expenses')
-            .select('amount, date_incurred')
-            .gte('date_incurred', sixMonthsAgo.toIso8601String()),
+            .select('amount, date_incurred'),
       ]);
 
       final summary = results[0] as Map<String, dynamic>? ?? {};
@@ -268,9 +265,14 @@ class _HomeScreenState extends State<HomeScreen>
       // Process invoices for monthly data
       for (var inv in recentInvoicesData) {
         try {
+          if (inv['status'] != 'Paid') continue;
+
           DateTime date = DateTime.parse(inv['date_issued']);
           int monthIndex = date.month - 1;
-          _incomeData[monthIndex] += (inv['amount'] as num).toDouble();
+
+          double amount = (inv['amount'] as num?)?.toDouble() ?? 0;
+
+          _incomeData[monthIndex] += amount;
         } catch (e) {
           continue;
         }
@@ -281,7 +283,10 @@ class _HomeScreenState extends State<HomeScreen>
         try {
           DateTime date = DateTime.parse(exp['date_incurred']);
           int monthIndex = date.month - 1;
-          _expenseData[monthIndex] += (exp['amount'] as num).toDouble();
+
+          double amount = (exp['amount'] as num?)?.toDouble() ?? 0;
+
+          _expenseData[monthIndex] += amount;
         } catch (e) {
           continue;
         }
@@ -304,8 +309,9 @@ class _HomeScreenState extends State<HomeScreen>
       for (var exp in expensesData) {
         transactions.add({
           'id': exp['id'],
-          'title': exp['vendor_name'] ?? exp['description'] ?? 'Expense',
+          'title': exp['description'] ?? exp['vendor_name'] ?? 'Expense',
           'subtitle': exp['category_name'] ?? 'Expense',
+          'vendor': exp['vendor_name'],
           'amount': '-₹${NumberFormat('#,##0').format(exp['amount'] ?? 0)}',
           'isExpense': true,
           'date': DateTime.parse(exp['date_incurred']),
@@ -328,6 +334,10 @@ class _HomeScreenState extends State<HomeScreen>
       _generateLastMonths();
       _applyOverviewFilter();
 
+      if (mounted) {
+        setState(() {});
+      }
+
     } catch (e) {
       print('Error loading dashboard data: $e');
     }
@@ -336,11 +346,25 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: Brightness.light,
-      ),
-      child: Scaffold(
+        value: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+        ),
+        child: WillPopScope(
+          onWillPop: () async {
+
+            // If not on home tab → go to home tab
+            if (_currentIndex != 0) {
+              setState(() {
+                _currentIndex = 0;
+              });
+              return false;
+            }
+
+            // If already on home → exit app
+            return true;
+          },
+          child: Scaffold(
         backgroundColor: const Color(0xFF05060A),
         body: Stack(
           children: [
@@ -438,7 +462,9 @@ class _HomeScreenState extends State<HomeScreen>
                     ExpenseScreen(
                       onBack: () => setState(() => _currentIndex = 0),
                     ),
-                    const AiAssistantScreen(),
+                    AiAssistantScreen(
+                      onBack: () => setState(() => _currentIndex = 0),
+                    ),
                     InvestmentPortfolioScreen(
                       onBack: () => setState(() => _currentIndex = 0),
                     ),
@@ -451,11 +477,12 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ],
         ),
-        bottomNavigationBar: GlassBottomNav(
+        bottomNavigationBar: UltraGlassBottomNav(
           currentIndex: _currentIndex,
           onTap: (i) => setState(() => _currentIndex = i),
         ),
       ),
+        ),
     );
   }
 
@@ -608,6 +635,7 @@ class _HomeScreenState extends State<HomeScreen>
                   tx['title'],
                   tx['subtitle'],
                   tx['amount'],
+                  vendor: tx['vendor'],
                   isExpense: tx['isExpense'],
                 ),
               ),
@@ -674,7 +702,7 @@ class _HomeScreenState extends State<HomeScreen>
             .limit(5),
         supabase
             .from('expenses')
-            .select('id, amount, description, date_incurred, category_name')
+            .select('id, amount, description, vendor_name, date_incurred, category_name')
             .gte('date_incurred', startDate.toIso8601String())
             .order('date_incurred', ascending: false)
             .limit(5),
@@ -699,8 +727,9 @@ class _HomeScreenState extends State<HomeScreen>
       for (var exp in expensesData) {
         filtered.add({
           'id': exp['id'],
-          'title': exp['description'] ?? 'Expense',
+          'title': exp['description'] ?? exp['vendor_name'] ?? 'Expense',
           'subtitle': exp['category_name'] ?? 'Expense',
+          'vendor': exp['vendor_name'],
           'amount': '-₹${NumberFormat('#,##0').format(exp['amount'] ?? 0)}',
           'isExpense': true,
           'date': DateTime.parse(exp['date_incurred']),
@@ -721,8 +750,9 @@ class _HomeScreenState extends State<HomeScreen>
       String title,
       String subtitle,
       String amount, {
+        String? vendor,
         bool isExpense = false,
-      }) {
+      }){
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -753,11 +783,22 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
+
               const SizedBox(height: 4),
+
               Text(
                 subtitle,
                 style: const TextStyle(fontSize: 12, color: Colors.white54),
               ),
+
+              if (vendor != null)
+                Text(
+                  vendor,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Colors.white38,
+                  ),
+                ),
             ],
           ),
         ),
@@ -773,10 +814,15 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _analyticsSection() {
+    double maxValue = _getMaxChartValue();
+    double safeMax = maxValue == 0 ? 10000 : maxValue * 1.2;
+
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
+          /// HEADER
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -801,10 +847,7 @@ class _HomeScreenState extends State<HomeScreen>
                     icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                     items: _filters.map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
+                      return DropdownMenuItem(value: value, child: Text(value));
                     }).toList(),
                     onChanged: (value) {
                       if (value != null) {
@@ -816,12 +859,17 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
+
           const SizedBox(height: 16),
+
+          /// INCOME TEXT
           const Text(
             "Expected income",
             style: TextStyle(color: Colors.white54),
           ),
+
           const SizedBox(height: 6),
+
           Text(
             "₹${NumberFormat('#,##0').format(_getTotalIncome())}",
             style: const TextStyle(
@@ -830,65 +878,129 @@ class _HomeScreenState extends State<HomeScreen>
               color: Colors.white,
             ),
           ),
-          const SizedBox(height: 20),
+
+          const SizedBox(height: 24),
+
+          /// CHART
           SizedBox(
-            height: 180,
+            height: 220, // increased height
             child: LineChart(
               LineChartData(
+
+                /// prevent graph overflow
+                minY: _getMinChartValue(),
+                maxY: safeMax,
+
+                /// GRID
                 gridData: FlGridData(
                   show: true,
-                  horizontalInterval: 1000,
+                  horizontalInterval: safeMax / 4,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
-                      color: Colors.white.withOpacity(0.1),
+                      color: Colors.white.withOpacity(0.15),
                       strokeWidth: 1,
                     );
                   },
                 ),
+
+                /// TITLES
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 40,
+                      reservedSize: 45,
                       getTitlesWidget: (value, meta) {
                         return Text(
-                          "₹${(value / 1000).toStringAsFixed(1)}K",
+                          "₹${(value / 1000).toStringAsFixed(0)}K",
                           style: const TextStyle(
-                            color: Colors.white38,
-                            fontSize: 10,
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
                           ),
                         );
                       },
                     ),
                   ),
+
                   bottomTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
+
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
+
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
+
                 borderData: FlBorderData(show: false),
+
+                /// TOOLTIP
+                lineTouchData: LineTouchData(
+                  handleBuiltInTouches: true,
+                  touchTooltipData: LineTouchTooltipData(
+                    tooltipBgColor: const Color(0xFF1F2937),
+                    tooltipRoundedRadius: 10,
+                    tooltipPadding: const EdgeInsets.all(8),
+                    getTooltipItems: (spots) {
+                      return spots.map((spot) {
+                        return LineTooltipItem(
+                          "₹${spot.y.toStringAsFixed(0)}",
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        );
+                      }).toList();
+                    },
+                  ),
+                ),
+
+                /// LINE DATA
                 lineBarsData: [
                   LineChartBarData(
                     spots: _getChartData(),
+
                     isCurved: true,
-                    color: const Color(0xff6C63FF),
                     barWidth: 3,
+                    isStrokeCapRound: true,
+
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xffA78BFA),
+                        Color(0xff6366F1),
+                      ],
+                    ),
+
                     dotData: const FlDotData(show: false),
+
+                    /// remove grey overlay
+                    belowBarData: BarAreaData(show: false),
                   ),
                 ],
-                minY: 0,
-                maxY: _getMaxChartValue(),
               ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  double _getMinChartValue() {
+    double min = 0;
+
+    for (var spot in _getChartData()) {
+      if (spot.y < min) min = spot.y;
+    }
+
+    // Always allow at least -200K
+    if (min > -200000) {
+      return -200000;
+    }
+
+    return min * 1.2;
   }
 
   double _getTotalIncome() {
@@ -908,23 +1020,42 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<FlSpot> _getChartData() {
+    int count = 6;
+
     switch (_selectedFilterAnalytic) {
       case "Week":
-        return List.generate(7, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
+        count = 7;
+        break;
       case "Month":
-        return List.generate(5, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
+        count = 5;
+        break;
       case "Year":
-        return List.generate(5, (i) => FlSpot(i.toDouble(), _incomeData[i % 12] * 1.5));
+        count = 12;
+        break;
       default:
-        return List.generate(6, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
+        count = 6;
     }
+
+    return List.generate(count, (i) {
+      double value = i < _incomeChartData.length
+          ? _incomeChartData[i]
+          : 0;
+
+      if (value < 0) value = 0;
+
+      return FlSpot(i.toDouble(), value);
+    });
   }
 
   Widget _monthlyTrendSection() {
+    double maxValue = _getMaxBarValue();
+    double safeMax = maxValue == 0 ? 10000 : maxValue * 1.2;
+
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          /// HEADER
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -949,10 +1080,7 @@ class _HomeScreenState extends State<HomeScreen>
                     icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
                     style: const TextStyle(color: Colors.white),
                     items: _trendOptions.map((String value) {
-                      return DropdownMenuItem<String>(
-                        value: value,
-                        child: Text(value),
-                      );
+                      return DropdownMenuItem(value: value, child: Text(value));
                     }).toList(),
                     onChanged: (value) {
                       if (value != null) {
@@ -964,85 +1092,130 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
+
           const SizedBox(height: 14),
+
           Divider(color: Colors.white.withOpacity(0.1)),
+
           const SizedBox(height: 20),
+
+          /// CHART
           SizedBox(
-            height: 220,
+            height: 240,
             child: BarChart(
               BarChartData(
-                alignment: BarChartAlignment.spaceAround,
-                maxY: _getMaxBarValue(),
+                alignment: BarChartAlignment.spaceBetween,
+                maxY: safeMax,
+
+                /// TOOLTIP
+                barTouchData: BarTouchData(
+                  enabled: true,
+                  touchTooltipData: BarTouchTooltipData(
+                    tooltipBgColor: const Color(0xFF1F2937),
+                    tooltipRoundedRadius: 12,
+                    tooltipPadding: const EdgeInsets.all(10),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      return BarTooltipItem(
+                        "₹${rod.toY.toStringAsFixed(0)}",
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                /// GRID (same style as analytics)
                 gridData: FlGridData(
                   show: true,
-                  horizontalInterval: 1000,
+                  horizontalInterval: safeMax / 4,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
-                      color: Colors.white.withOpacity(0.08),
+                      color: Colors.white.withOpacity(0.15),
                       strokeWidth: 1,
                     );
                   },
                 ),
+
                 borderData: FlBorderData(show: false),
+
+                /// AXIS
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 40,
+                      reservedSize: 45,
                       getTitlesWidget: (value, meta) {
                         return Text(
                           "₹${(value / 1000).toStringAsFixed(0)}K",
                           style: const TextStyle(
-                            color: Colors.white38,
-                            fontSize: 10,
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
                           ),
                         );
                       },
                     ),
                   ),
+
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
+                      interval: 1,
                       getTitlesWidget: (value, meta) {
-                        getTitlesWidget: (value, meta) {
-                          int index = value.toInt();
-                          if (index >= 0 && index < _months.length) {
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(
-                                _months[index],
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            );
-                          }
-                          return const SizedBox();
-                        };
                         int index = value.toInt();
-                        if (index < _months.length) {
-                          return Text(
-                            _months[index],
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
+
+                        if (index >= 0 && index < _months.length) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              _months[index],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           );
                         }
-                        return const Text('');
+
+                        return const SizedBox();
                       },
                     ),
                   ),
+
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
+
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
+
+                /// BARS
                 barGroups: List.generate(_months.length, (index) {
-                  return _barData(index, _incomeChartData[index]);
+                  return BarChartGroupData(
+                    x: index,
+                    barsSpace: 6,
+                    barRods: [
+                      BarChartRodData(
+                        toY: _incomeChartData[index],
+                        width: 14,
+                        borderRadius: BorderRadius.circular(6),
+                        gradient: const LinearGradient(
+                          colors: [
+                            Color(0xFFA78BFA),
+                            Color(0xFF6366F1),
+                          ],
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                        ),
+                      ),
+                    ],
+                  );
                 }),
               ),
             ),
@@ -1054,21 +1227,38 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _getMaxBarValue() {
     double max = 0;
-    for (int i = 0; i < _months.length; i++) {
-      if (_incomeData[i % 12] > max) max = _incomeData[i % 12];
+
+    for (double v in _incomeChartData) {
+      if (v > max) max = v;
     }
-    return max > 0 ? max + 1000 : 10000;
+
+    return max == 0 ? 10000 : max * 1.3;
   }
 
   BarChartGroupData _barData(int x, double value) {
     return BarChartGroupData(
       x: x,
+      barsSpace: 4,
       barRods: [
         BarChartRodData(
           toY: value,
           width: 14,
           borderRadius: BorderRadius.circular(6),
-          color: const Color(0xff6C63FF),
+
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xFFA78BFA),
+              Color(0xFF6366F1),
+            ],
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+          ),
+
+          backDrawRodData: BackgroundBarChartRodData(
+            show: true,
+            toY: _getMaxBarValue(),
+            color: Colors.white.withOpacity(0.05),
+          ),
         ),
       ],
     );
@@ -1222,7 +1412,9 @@ class _HomeScreenState extends State<HomeScreen>
               )
             ],
           ),
+
           const SizedBox(height: 24),
+
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
@@ -1231,16 +1423,20 @@ class _HomeScreenState extends State<HomeScreen>
               _Legend(color: Colors.redAccent, text: "Expenses"),
             ],
           ),
+
           const SizedBox(height: 24),
+
           SizedBox(
             height: 260,
             child: BarChart(
               BarChartData(
+                backgroundColor: Colors.transparent,
                 maxY: _getMaxIncomeExpenseValue(),
-                alignment: BarChartAlignment.center,
+                alignment: BarChartAlignment.spaceAround,
+
                 gridData: FlGridData(
                   show: true,
-                  horizontalInterval: 1000,
+                  horizontalInterval: _getMaxIncomeExpenseValue() / 5,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
@@ -1249,12 +1445,33 @@ class _HomeScreenState extends State<HomeScreen>
                     );
                   },
                 ),
+
                 borderData: FlBorderData(show: false),
+
+                barTouchData: BarTouchData(
+                  touchTooltipData: BarTouchTooltipData(
+                    tooltipBgColor: const Color(0xFF1F2937),
+                    tooltipRoundedRadius: 12,
+                    tooltipPadding: const EdgeInsets.all(10),
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      return BarTooltipItem(
+                        "₹${rod.toY.toStringAsFixed(0)}",
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
-                      reservedSize: 45,
+                      reservedSize: 50,
+                      interval: _getMaxIncomeExpenseValue() / 5,
                       getTitlesWidget: (value, meta) {
                         return Text(
                           "₹${value.toInt()}",
@@ -1266,13 +1483,13 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     ),
                   ),
+
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         int index = value.toInt();
-
                         if (index >= 0 && index < _months.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
@@ -1285,18 +1502,20 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           );
                         }
-
                         return const SizedBox();
                       },
                     ),
                   ),
+
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
+
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
+
                 barGroups: List.generate(_months.length, (index) {
                   return BarChartGroupData(
                     x: index,
@@ -1793,7 +2012,12 @@ class _HomeScreenState extends State<HomeScreen>
     return _netBalanceCard(balance, income, expenses, netProfit);
   }
 
-  Widget _netBalanceCard(double balance, double income, double expenses, double netProfit) {
+  Widget _netBalanceCard(
+      double balance,
+      double income,
+      double expenses,
+      double netProfit,
+      ) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
@@ -1804,13 +2028,13 @@ class _HomeScreenState extends State<HomeScreen>
             borderRadius: BorderRadius.circular(28),
             gradient: LinearGradient(
               colors: [
-                const Color(0xFF1E1B4B).withOpacity(0.8),
-                const Color(0xFF0F172A).withOpacity(0.8),
+                const Color(0xff312E81).withOpacity(0.85),
+                const Color(0xff0F172A).withOpacity(0.85),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1819,46 +2043,55 @@ class _HomeScreenState extends State<HomeScreen>
                 "NET BALANCE",
                 style: TextStyle(
                   fontSize: 12,
-                  letterSpacing: 1.2,
-                  color: Colors.white54,
+                  letterSpacing: 1.3,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white60,
                 ),
               ),
-              const SizedBox(height: 10),
+
+              const SizedBox(height: 8),
+
               Text(
                 "₹${NumberFormat('#,##0').format(balance)}",
                 style: const TextStyle(
-                  fontSize: 34,
+                  fontSize: 36,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
               ),
-              const SizedBox(height: 22),
+
+              const SizedBox(height: 26),
+
               Row(
                 children: [
                   Expanded(
                     child: _miniStatCard(
-                      "INCOME",
-                      "₹${NumberFormat.compact().format(income)}",
-                      Icons.arrow_upward,
-                      Colors.green,
+                      title: "INCOME",
+                      value: "₹${NumberFormat.compact().format(income)}",
+                      icon: Icons.trending_up,
+                      color: const Color(0xff22c55e),
                     ),
                   ),
+
                   const SizedBox(width: 12),
+
                   Expanded(
                     child: _miniStatCard(
-                      "EXPENSES",
-                      "₹${NumberFormat.compact().format(expenses)}",
-                      Icons.arrow_downward,
-                      Colors.red,
+                      title: "EXPENSES",
+                      value: "₹${NumberFormat.compact().format(expenses)}",
+                      icon: Icons.trending_down,
+                      color: const Color(0xffef4444),
                     ),
                   ),
+
                   const SizedBox(width: 12),
+
                   Expanded(
                     child: _miniStatCard(
-                      "NET PROFIT",
-                      "₹${NumberFormat.compact().format(netProfit)}",
-                      null,
-                      Colors.blue,
+                      title: "NET PROFIT",
+                      value: "₹${NumberFormat.compact().format(netProfit)}",
+                      icon: Icons.account_balance_wallet,
+                      color: const Color(0xff3b82f6),
                     ),
                   ),
                 ],
@@ -1870,38 +2103,61 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _miniStatCard(String title, String value, IconData? icon, Color color) {
+  Widget _miniStatCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      height: 100,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        color: Colors.white.withOpacity(0.05),
-        border: Border.all(color: Colors.white.withOpacity(0.06)),
+        color: Colors.white.withOpacity(0.06),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  icon,
+                  color: color,
+                  size: 16,
+                ),
+              ),
+            ],
+          ),
+
+          const Spacer(),
+
           Text(
             title,
             style: const TextStyle(
               fontSize: 10,
-              color: Colors.white54,
               letterSpacing: 1,
+              color: Colors.white60,
             ),
           ),
-          const SizedBox(height: 6),
+
+          const SizedBox(height: 3),
+
           Text(
             value,
             style: const TextStyle(
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
           ),
-          if (icon != null) ...[
-            const SizedBox(height: 6),
-            Icon(icon, size: 14, color: color),
-          ],
         ],
       ),
     );

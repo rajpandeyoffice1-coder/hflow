@@ -4,21 +4,13 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// ============================================================================
-// TAX CALCULATION MODELS
-// ============================================================================
-
 class TaxCalculationModel {
   String fiscalYear;
   double businessIncome;
   double otherIncome;
   double grossIncome;
-
-  // Tax Settings
   String taxRegime;
   String ageCategory;
-
-  // Deductions
   double section80C;
   double section80D;
   double nps;
@@ -26,12 +18,8 @@ class TaxCalculationModel {
   double educationLoan;
   double donations;
   double savingsInterest;
-
-  // Business Expenses
   List<BusinessExpense> businessExpenses;
   List<Asset> assets;
-
-  // Results
   double newRegimeTax;
   double oldRegimeTax;
   double recommendedTax;
@@ -70,23 +58,10 @@ class TaxCalculationModel {
       'business_income': businessIncome,
       'other_income': otherIncome,
       'total_deductions':
-          section80C +
-          section80D +
-          nps +
-          homeLoanInterest +
-          educationLoan +
-          donations +
-          savingsInterest,
+      section80C + section80D + nps + homeLoanInterest + educationLoan + donations + savingsInterest,
       'standard_deduction': 0,
       'taxable_income':
-          grossIncome -
-          (section80C +
-              section80D +
-              nps +
-              homeLoanInterest +
-              educationLoan +
-              donations +
-              savingsInterest),
+      grossIncome - (section80C + section80D + nps + homeLoanInterest + educationLoan + donations + savingsInterest),
       'regime_used': recommendedRegime,
       'tax_before_rebate': recommendedTax,
       'rebate_under_87a': 0,
@@ -94,9 +69,7 @@ class TaxCalculationModel {
       'health_education_cess': recommendedTax * 0.04,
       'surcharge': 0,
       'total_tax_liability': recommendedTax * 1.04,
-      'effective_tax_rate': grossIncome > 0
-          ? (recommendedTax / grossIncome)
-          : 0,
+      'effective_tax_rate': grossIncome > 0 ? (recommendedTax / grossIncome) : 0,
       'new_regime_tax': newRegimeTax,
       'old_regime_tax': oldRegimeTax,
       'recommended_regime': recommendedRegime,
@@ -162,7 +135,9 @@ class BusinessExpense {
   factory BusinessExpense.fromJson(Map<String, dynamic> json) {
     return BusinessExpense(
       name: json['name'],
-      amount: (json['amount'] ?? 0).toDouble(),
+      amount: (json['amount'] is num)
+          ? (json['amount'] as num).toDouble()
+          : double.tryParse(json['amount']?.toString() ?? '0') ?? 0.0,
       expenseDate: DateTime.parse(json['expense_date']),
       isAsset: json['is_asset'] ?? false,
       category: json['category'],
@@ -199,16 +174,16 @@ class Asset {
     return Asset(
       name: json['name'],
       type: json['type'],
-      value: (json['value'] ?? 0).toDouble(),
-      rate: (json['rate'] ?? 0).toDouble(),
+      value: (json['value'] is num)
+          ? (json['value'] as num).toDouble()
+          : double.tryParse(json['value']?.toString() ?? '0') ?? 0.0,
+      rate: (json['rate'] is num)
+          ? (json['rate'] as num).toDouble()
+          : double.tryParse(json['rate']?.toString() ?? '0') ?? 0.0,
       purchaseDate: DateTime.parse(json['purchase_date']),
     );
   }
 }
-
-// ============================================================================
-// SUPABASE SERVICE
-// ============================================================================
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -266,7 +241,7 @@ class SupabaseService {
         'user_id': userId,
         ...income,
         'gross_total_income':
-            (income['business_income'] ?? 0) + (income['other_income'] ?? 0),
+        (income['business_income'] ?? 0) + (income['other_income'] ?? 0),
         'updated_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
@@ -275,9 +250,9 @@ class SupabaseService {
   }
 
   Future<List<Map<String, dynamic>>> getTaxDeductions(
-    String fiscalYear,
-    String section,
-  ) async {
+      String fiscalYear,
+      String section,
+      ) async {
     try {
       final response = await client
           .from('tax_deductions')
@@ -306,8 +281,8 @@ class SupabaseService {
   }
 
   Future<List<Map<String, dynamic>>> getBusinessExpenses(
-    String fiscalYear,
-  ) async {
+      String fiscalYear,
+      ) async {
     try {
       final response = await client
           .from('tax_business_expenses')
@@ -372,18 +347,9 @@ class SupabaseService {
       final deductions80D = await getTaxDeductions(fiscalYear, '80D');
       final expenses = await getBusinessExpenses(fiscalYear);
 
-      double total80C = deductions80C.fold(
-        0,
-        (sum, item) => sum + (item['amount'] ?? 0),
-      );
-      double total80D = deductions80D.fold(
-        0,
-        (sum, item) => sum + (item['amount'] ?? 0),
-      );
-      double totalExpenses = expenses.fold(
-        0,
-        (sum, item) => sum + (item['amount'] ?? 0),
-      );
+      double total80C = deductions80C.fold(0, (sum, item) => sum + (item['amount'] ?? 0));
+      double total80D = deductions80D.fold(0, (sum, item) => sum + (item['amount'] ?? 0));
+      double totalExpenses = expenses.fold(0, (sum, item) => sum + (item['amount'] ?? 0));
 
       return {
         'income': income ?? {},
@@ -397,10 +363,6 @@ class SupabaseService {
     }
   }
 }
-
-// ============================================================================
-// TOAST SERVICE
-// ============================================================================
 
 Widget _premiumLoader(String message) {
   return Center(
@@ -452,7 +414,7 @@ Widget _premiumLoader(String message) {
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.6,
-                  decoration: TextDecoration.none, // ✅ removes underline
+                  decoration: TextDecoration.none,
                   color: const Color(0xFFE0E7FF),
                   shadows: [
                     Shadow(
@@ -536,10 +498,6 @@ class ToastService {
   }
 }
 
-// ============================================================================
-// LOADING OVERLAY WIDGET - FIXED
-// ============================================================================
-
 class LoadingOverlay extends StatelessWidget {
   final Widget child;
   final bool isLoading;
@@ -553,16 +511,14 @@ class LoadingOverlay extends StatelessWidget {
   });
 
   @override
-  @override
   Widget build(BuildContext context) {
     return Stack(
       children: [
         child,
-
         if (isLoading)
           Positioned.fill(
             child: Container(
-              color: Colors.black.withOpacity(0.45), // softer dim
+              color: Colors.black.withOpacity(0.45),
               child: _premiumLoader(loadingMessage ?? "Saving data..."),
             ),
           ),
@@ -571,9 +527,334 @@ class LoadingOverlay extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// MAIN TAX CALCULATOR SCREEN - FIXED UI
-// ============================================================================
+class FiscalYearSelector extends StatefulWidget {
+  final String currentFiscalYear;
+  final Function(String) onYearSelected;
+
+  const FiscalYearSelector({
+    super.key,
+    required this.currentFiscalYear,
+    required this.onYearSelected,
+  });
+
+  @override
+  State<FiscalYearSelector> createState() => _FiscalYearSelectorState();
+}
+
+class _FiscalYearSelectorState extends State<FiscalYearSelector> {
+  late String selectedYear;
+  List<String> fiscalYears = [];
+
+  @override
+  void initState() {
+    super.initState();
+    selectedYear = widget.currentFiscalYear;
+    _generateFiscalYears();
+  }
+
+  void _generateFiscalYears() {
+    int currentYear = DateTime.now().year;
+    for (int i = 3; i >= 0; i--) {
+      int startYear = currentYear - i;
+      int endYear = startYear + 1;
+      fiscalYears.add('$startYear-${endYear.toString().substring(2)}');
+    }
+    for (int i = 1; i <= 2; i++) {
+      int startYear = currentYear + i;
+      int endYear = startYear + 1;
+      fiscalYears.add('$startYear-${endYear.toString().substring(2)}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1F2E),
+      title: const Text(
+        'Select Fiscal Year',
+        style: TextStyle(color: Colors.white, fontSize: 18),
+      ),
+      content: Container(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: fiscalYears.length,
+          itemBuilder: (context, index) {
+            String year = fiscalYears[index];
+            bool isSelected = year == selectedYear;
+            return Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              child: ListTile(
+                title: Text(
+                  'FY $year',
+                  style: TextStyle(
+                    color: isSelected ? const Color(0xFF5B8CFF) : Colors.white70,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                subtitle: Text(
+                  _getYearDescription(year),
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.5),
+                    fontSize: 11,
+                  ),
+                ),
+                selected: isSelected,
+                selectedTileColor: const Color(0xFF5B8CFF).withOpacity(0.1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: isSelected
+                      ? BorderSide(color: const Color(0xFF5B8CFF).withOpacity(0.5))
+                      : BorderSide.none,
+                ),
+                onTap: () {
+                  setState(() {
+                    selectedYear = year;
+                  });
+                },
+              ),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text(
+            'Cancel',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () {
+            widget.onYearSelected(selectedYear);
+            Navigator.pop(context);
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF5B8CFF),
+          ),
+          child: const Text('Select'),
+        ),
+      ],
+    );
+  }
+
+  String _getYearDescription(String year) {
+    if (year == fiscalYears[3]) {
+      return 'Current Financial Year';
+    } else if (year == fiscalYears[2]) {
+      return 'Previous Financial Year';
+    } else if (year == fiscalYears[4]) {
+      return 'Next Financial Year';
+    }
+    return '';
+  }
+}
+
+class TaxSummaryCard extends StatelessWidget {
+  final double grossIncome;
+  final double taxableIncome;
+  final double totalTaxLiability;
+  final double effectiveTaxRate;
+  final String fiscalYear;
+
+  const TaxSummaryCard({
+    super.key,
+    required this.grossIncome,
+    required this.taxableIncome,
+    required this.totalTaxLiability,
+    required this.effectiveTaxRate,
+    required this.fiscalYear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFFEF4444).withOpacity(0.2),
+            const Color(0xFFEF4444).withOpacity(0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Color(0xFFEF4444), size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Tax Liability Summary',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEF4444).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'FY $fiscalYear',
+                  style: const TextStyle(
+                    color: Color(0xFFEF4444),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildSummaryItem(
+                  'Gross Income',
+                  '₹${_formatNumber(grossIncome.round())}',
+                  Colors.white70,
+                ),
+              ),
+              Container(
+                height: 30,
+                width: 1,
+                color: Colors.white.withOpacity(0.1),
+              ),
+              Expanded(
+                child: _buildSummaryItem(
+                  'Taxable Income',
+                  '₹${_formatNumber(taxableIncome.round())}',
+                  Colors.white70,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white10, height: 1),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Total Tax Payable',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '₹${_formatNumber(totalTaxLiability.round())}',
+                      style: const TextStyle(
+                        color: Color(0xFFEF4444),
+                        fontSize: 28,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    const Text(
+                      'Effective Tax Rate',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${effectiveTaxRate.toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEF4444).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Color(0xFFEF4444), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'This is the estimated tax liability for FY $fiscalYear. Final tax may vary based on actual deductions and exemptions claimed.',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.7),
+                      fontSize: 10,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.5),
+            fontSize: 11,
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _formatNumber(int number) {
+    if (number >= 10000000) {
+      return '${(number / 10000000).toStringAsFixed(1)}Cr';
+    } else if (number >= 100000) {
+      return '${(number / 100000).toStringAsFixed(1)}L';
+    } else if (number >= 1000) {
+      return '${(number / 1000).toStringAsFixed(1)}K';
+    }
+    return number.toString();
+  }
+}
 
 class TaxCalculatorScreen extends StatefulWidget {
   final VoidCallback? onBack;
@@ -587,32 +868,33 @@ class TaxCalculatorScreen extends StatefulWidget {
 class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   static const double _headerHeight = 60;
   final SupabaseService _supabaseService = SupabaseService();
-  final String fiscalYear = "2025-26";
 
-  // Loading states
+  List<String> fiscalYears = ['2025-26', '2024-25', '2023-24', '2022-23'];
+  String selectedFiscalYear = '2025-26';
+
   bool _isLoading = false;
   bool _isSaving = false;
   String _loadingMessage = 'Refreshing data...';
 
-  // Controllers for Income Details
-  final TextEditingController businessIncomeController =
-      TextEditingController();
+  double totalEarnings = 0;
+  double paidInvoices = 0;
+  double pendingInvoices = 0;
+  Map<String, double> monthlyEarnings = {};
+
+  final TextEditingController businessIncomeController = TextEditingController();
   final TextEditingController otherIncomeController = TextEditingController();
 
-  // Tax Settings
   String selectedRegime = 'new';
   String selectedAgeGroup = 'below_60';
   String selectedAssessmentYear = '2025-26';
 
-  // Deduction Controllers
   final TextEditingController ppfController = TextEditingController();
   final TextEditingController elssController = TextEditingController();
   final TextEditingController licController = TextEditingController();
   final TextEditingController epfController = TextEditingController();
   final TextEditingController nscController = TextEditingController();
   final TextEditingController fdController = TextEditingController();
-  final TextEditingController homeLoanPrincipalController =
-      TextEditingController();
+  final TextEditingController homeLoanPrincipalController = TextEditingController();
   final TextEditingController tuitionController = TextEditingController();
 
   final TextEditingController healthSelfController = TextEditingController();
@@ -620,12 +902,10 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   final TextEditingController healthCheckupController = TextEditingController();
 
   final TextEditingController npsController = TextEditingController();
-  final TextEditingController homeLoanInterestController =
-      TextEditingController();
+  final TextEditingController homeLoanInterestController = TextEditingController();
   final TextEditingController educationLoanController = TextEditingController();
   final TextEditingController donationsController = TextEditingController();
-  final TextEditingController savingsInterestController =
-      TextEditingController();
+  final TextEditingController savingsInterestController = TextEditingController();
 
   bool isPresumptiveMode = true;
   List<BusinessExpense> businessExpenses = [];
@@ -635,54 +915,125 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   double oldRegimeTax = 0;
   bool showResults = false;
 
-  String totalEarnings = "₹0";
-  String paidInvoices = "₹0";
-  String pendingInvoices = "₹0";
-
   @override
   void initState() {
     super.initState();
+    _loadInvoiceData();
     _loadSavedData();
+    _generateFiscalYears();
+  }
 
-    businessExpenses.add(
-      BusinessExpense(name: 'Rent', amount: 5000, expenseDate: DateTime.now()),
-    );
-    businessExpenses.add(
-      BusinessExpense(
-        name: 'Internet',
-        amount: 1000,
-        expenseDate: DateTime.now(),
-      ),
-    );
+  @override
+  void dispose() {
+    businessIncomeController.dispose();
+    otherIncomeController.dispose();
+    ppfController.dispose();
+    elssController.dispose();
+    licController.dispose();
+    epfController.dispose();
+    nscController.dispose();
+    fdController.dispose();
+    homeLoanPrincipalController.dispose();
+    tuitionController.dispose();
+    healthSelfController.dispose();
+    healthParentsController.dispose();
+    healthCheckupController.dispose();
+    npsController.dispose();
+    homeLoanInterestController.dispose();
+    educationLoanController.dispose();
+    donationsController.dispose();
+    savingsInterestController.dispose();
+    super.dispose();
+  }
 
-    assets.add(
-      Asset(
-        name: 'Laptop',
-        type: 'Computer',
-        value: 80000,
-        rate: 40,
-        purchaseDate: DateTime.now().subtract(const Duration(days: 30)),
-      ),
-    );
-    assets.add(
-      Asset(
-        name: 'Office Desk',
-        type: 'Furniture',
-        value: 20000,
-        rate: 10,
-        purchaseDate: DateTime.now().subtract(const Duration(days: 60)),
-      ),
-    );
+  void _generateFiscalYears() {
+    int currentYear = DateTime.now().year;
+    fiscalYears = [];
+    for (int i = 3; i >= 0; i--) {
+      int startYear = currentYear - i;
+      int endYear = startYear + 1;
+      fiscalYears.add('$startYear-${endYear.toString().substring(2)}');
+    }
+    for (int i = 1; i <= 2; i++) {
+      int startYear = currentYear + i;
+      int endYear = startYear + 1;
+      fiscalYears.add('$startYear-${endYear.toString().substring(2)}');
+    }
+  }
+
+  Future<void> _loadInvoiceData() async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      final response = await supabase
+          .from('invoices')
+          .select('amount, status, date_issued');
+
+      List<dynamic> invoices = response;
+
+      double total = 0;
+      double paid = 0;
+      double pending = 0;
+      Map<String, double> monthly = {};
+
+      for (var invoice in invoices) {
+        DateTime dateIssued = DateTime.parse(invoice['date_issued']);
+        String invoiceFiscalYear = _getFiscalYear(dateIssued);
+
+        if (invoiceFiscalYear == selectedFiscalYear) {
+          double amount = safeDouble(invoice['amount']);
+          total += amount;
+
+          String status = invoice['status']?.toString().toUpperCase() ?? '';
+          if (status == 'PAID') {
+            paid += amount;
+          } else if (status == 'PENDING' || status == 'OVERDUE') {
+            pending += amount;
+          }
+
+          String monthKey = DateFormat('MMM yyyy').format(dateIssued);
+          monthly[monthKey] = (monthly[monthKey] ?? 0) + amount;
+        }
+      }
+
+      setState(() {
+        totalEarnings = total;
+        paidInvoices = paid;
+        pendingInvoices = pending;
+        monthlyEarnings = monthly;
+        businessIncomeController.text = total.toStringAsFixed(0);
+      });
+
+    } catch (e) {
+      debugPrint('Error loading invoice data: $e');
+    }
+  }
+
+  double safeDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  String _getFiscalYear(DateTime date) {
+    int year = date.year;
+    int month = date.month;
+    if (month >= 4) {
+      return '$year-${(year + 1).toString().substring(2)}';
+    } else {
+      return '${year - 1}-${year.toString().substring(2)}';
+    }
   }
 
   Future<void> _loadSavedData() async {
     setState(() {
       _isLoading = true;
-      _loadingMessage = 'Refreshing data...';
+      _loadingMessage = 'Loading data for FY $selectedFiscalYear...';
     });
 
     try {
-      final profile = await _supabaseService.getTaxProfile(fiscalYear);
+      final profile = await _supabaseService.getTaxProfile(selectedFiscalYear);
       if (profile != null) {
         setState(() {
           selectedRegime = profile['tax_regime'] ?? 'new';
@@ -690,112 +1041,58 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         });
       }
 
-      final income = await _supabaseService.getTaxIncome(fiscalYear);
+      final income = await _supabaseService.getTaxIncome(selectedFiscalYear);
       if (income != null) {
-        businessIncomeController.text =
-            income['business_income']?.toString() ?? '';
+        businessIncomeController.text = income['business_income']?.toString() ?? '';
         otherIncomeController.text = income['other_income']?.toString() ?? '';
       }
 
-      final deductions80C = await _supabaseService.getTaxDeductions(
-        fiscalYear,
-        '80C',
-      );
+      final deductions80C = await _supabaseService.getTaxDeductions(selectedFiscalYear, '80C');
       for (var deduction in deductions80C) {
         switch (deduction['category']) {
-          case 'PPF':
-            ppfController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'ELSS':
-            elssController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'LIC':
-            licController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'EPF':
-            epfController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'NSC':
-            nscController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'FD':
-            fdController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'Home Loan Principal':
-            homeLoanPrincipalController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
-          case 'Tuition':
-            tuitionController.text = deduction['amount']?.toString() ?? '';
-            break;
+          case 'PPF': ppfController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'ELSS': elssController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'LIC': licController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'EPF': epfController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'NSC': nscController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'FD': fdController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Home Loan Principal': homeLoanPrincipalController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Tuition': tuitionController.text = deduction['amount']?.toString() ?? ''; break;
         }
       }
 
-      final deductions80D = await _supabaseService.getTaxDeductions(
-        fiscalYear,
-        '80D',
-      );
+      final deductions80D = await _supabaseService.getTaxDeductions(selectedFiscalYear, '80D');
       for (var deduction in deductions80D) {
         switch (deduction['category']) {
-          case 'Self/Family':
-            healthSelfController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'Parents':
-            healthParentsController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
-          case 'Checkup':
-            healthCheckupController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
+          case 'Self/Family': healthSelfController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Parents': healthParentsController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Checkup': healthCheckupController.text = deduction['amount']?.toString() ?? ''; break;
         }
       }
 
-      final otherDeductions = await _supabaseService.getTaxDeductions(
-        fiscalYear,
-        'Other',
-      );
+      final otherDeductions = await _supabaseService.getTaxDeductions(selectedFiscalYear, 'Other');
       for (var deduction in otherDeductions) {
         switch (deduction['category']) {
-          case 'NPS':
-            npsController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'Home Loan Interest':
-            homeLoanInterestController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
-          case 'Education Loan':
-            educationLoanController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
-          case 'Donations':
-            donationsController.text = deduction['amount']?.toString() ?? '';
-            break;
-          case 'Savings Interest':
-            savingsInterestController.text =
-                deduction['amount']?.toString() ?? '';
-            break;
+          case 'NPS': npsController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Home Loan Interest': homeLoanInterestController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Education Loan': educationLoanController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Donations': donationsController.text = deduction['amount']?.toString() ?? ''; break;
+          case 'Savings Interest': savingsInterestController.text = deduction['amount']?.toString() ?? ''; break;
         }
       }
 
-      final expenses = await _supabaseService.getBusinessExpenses(fiscalYear);
+      final expenses = await _supabaseService.getBusinessExpenses(selectedFiscalYear);
       if (expenses.isNotEmpty) {
-        businessExpenses = expenses
-            .map(
-              (e) => BusinessExpense(
-                name: e['description'] ?? '',
-                amount: (e['amount'] ?? 0).toDouble(),
-                expenseDate: DateTime.parse(
-                  e['expense_date'] ?? DateTime.now().toIso8601String(),
-                ),
-                isAsset: e['is_asset'] ?? false,
-                category: e['expense_type'],
-              ),
-            )
-            .toList();
+        businessExpenses = expenses.map((e) => BusinessExpense(
+          name: e['description'] ?? '',
+          amount: safeDouble(e['amount']),
+          expenseDate: DateTime.parse(e['expense_date'] ?? DateTime.now().toIso8601String()),
+          isAsset: e['is_asset'] ?? false,
+          category: e['expense_type'],
+        )).toList();
       }
 
-      ToastService.showSuccess(context, 'Data loaded successfully!');
+      ToastService.showSuccess(context, 'Data loaded for FY $selectedFiscalYear');
     } catch (e) {
       ToastService.showError(context, 'Error loading data');
     } finally {
@@ -810,7 +1107,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
 
     try {
       await _supabaseService.saveTaxProfile({
-        'fiscal_year': fiscalYear,
+        'fiscal_year': selectedFiscalYear,
         'tax_regime': selectedRegime,
         'age_category': selectedAgeGroup,
         'residential_status': 'resident',
@@ -818,7 +1115,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       });
 
       await _supabaseService.saveTaxIncome({
-        'fiscal_year': fiscalYear,
+        'fiscal_year': selectedFiscalYear,
         'business_income': parseDouble(businessIncomeController.text),
         'other_income': parseDouble(otherIncomeController.text),
         'interest_income': parseDouble(otherIncomeController.text),
@@ -830,11 +1127,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       await _saveDeduction('80C', 'EPF', epfController);
       await _saveDeduction('80C', 'NSC', nscController);
       await _saveDeduction('80C', 'FD', fdController);
-      await _saveDeduction(
-        '80C',
-        'Home Loan Principal',
-        homeLoanPrincipalController,
-      );
+      await _saveDeduction('80C', 'Home Loan Principal', homeLoanPrincipalController);
       await _saveDeduction('80C', 'Tuition', tuitionController);
 
       await _saveDeduction('80D', 'Self/Family', healthSelfController);
@@ -842,22 +1135,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       await _saveDeduction('80D', 'Checkup', healthCheckupController);
 
       await _saveDeduction('Other', 'NPS', npsController);
-      await _saveDeduction(
-        'Other',
-        'Home Loan Interest',
-        homeLoanInterestController,
-      );
+      await _saveDeduction('Other', 'Home Loan Interest', homeLoanInterestController);
       await _saveDeduction('Other', 'Education Loan', educationLoanController);
       await _saveDeduction('Other', 'Donations', donationsController);
-      await _saveDeduction(
-        'Other',
-        'Savings Interest',
-        savingsInterestController,
-      );
+      await _saveDeduction('Other', 'Savings Interest', savingsInterestController);
 
       for (var expense in businessExpenses) {
         await _supabaseService.saveBusinessExpense({
-          'fiscal_year': fiscalYear,
+          'fiscal_year': selectedFiscalYear,
           'expense_type': expense.category ?? 'business',
           'description': expense.name,
           'amount': expense.amount,
@@ -875,15 +1160,11 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     }
   }
 
-  Future<void> _saveDeduction(
-    String section,
-    String category,
-    TextEditingController controller,
-  ) async {
+  Future<void> _saveDeduction(String section, String category, TextEditingController controller) async {
     double amount = parseDouble(controller.text);
     if (amount > 0) {
       await _supabaseService.saveTaxDeduction({
-        'fiscal_year': fiscalYear,
+        'fiscal_year': selectedFiscalYear,
         'deduction_section': section,
         'category': category,
         'description': '$category investment',
@@ -899,8 +1180,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   }
 
   double getTotal80C() {
-    double total =
-        parseDouble(ppfController.text) +
+    double total = parseDouble(ppfController.text) +
         parseDouble(elssController.text) +
         parseDouble(licController.text) +
         parseDouble(epfController.text) +
@@ -934,9 +1214,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     double savings = parseDouble(savingsInterestController.text);
     savings = savings > 10000 ? 10000.0 : savings;
 
-    return nps +
-        homeInterest +
-        savings +
+    return nps + homeInterest + savings +
         parseDouble(educationLoanController.text) +
         parseDouble(donationsController.text);
   }
@@ -975,19 +1253,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     double deductions80D = getTotal80D();
     double otherDeductions = getTotalOtherDeductions();
 
-    return gross -
-        businessDeduction -
-        depreciation -
-        deductions80C -
-        deductions80D -
-        otherDeductions;
+    return gross - businessDeduction - depreciation -
+        deductions80C - deductions80D - otherDeductions;
   }
 
   double getTaxableIncomeNew() {
     double gross = getGrossIncome();
     double businessDeduction = getTotalBusinessExpenses();
     double depreciation = getTotalDepreciation();
-
     return gross - businessDeduction - depreciation;
   }
 
@@ -995,18 +1268,44 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     double income = getTaxableIncomeNew();
     double tax = 0.0;
 
-    if (income <= 300000) {
-      tax = 0.0;
-    } else if (income <= 600000) {
-      tax = (income - 300000) * 0.05;
-    } else if (income <= 900000) {
-      tax = 15000.0 + (income - 600000) * 0.10;
-    } else if (income <= 1200000) {
-      tax = 45000.0 + (income - 900000) * 0.15;
-    } else if (income <= 1500000) {
-      tax = 90000.0 + (income - 1200000) * 0.20;
+    if (selectedFiscalYear == '2025-26') {
+      if (income <= 400000) {
+        tax = 0.0;
+      } else if (income <= 800000) {
+        tax = (income - 400000) * 0.05;
+      } else if (income <= 1200000) {
+        tax = 20000.0 + (income - 800000) * 0.10;
+      } else if (income <= 1600000) {
+        tax = 60000.0 + (income - 1200000) * 0.15;
+      } else if (income <= 2000000) {
+        tax = 120000.0 + (income - 1600000) * 0.20;
+      } else if (income <= 2400000) {
+        tax = 200000.0 + (income - 2000000) * 0.25;
+      } else {
+        tax = 300000.0 + (income - 2400000) * 0.30;
+      }
+
+      if (income <= 1200000) {
+        tax = tax > 60000 ? tax - 60000 : 0.0;
+      }
     } else {
-      tax = 150000.0 + (income - 1500000) * 0.30;
+      if (income <= 300000) {
+        tax = 0.0;
+      } else if (income <= 600000) {
+        tax = (income - 300000) * 0.05;
+      } else if (income <= 900000) {
+        tax = 15000.0 + (income - 600000) * 0.10;
+      } else if (income <= 1200000) {
+        tax = 45000.0 + (income - 900000) * 0.15;
+      } else if (income <= 1500000) {
+        tax = 90000.0 + (income - 1200000) * 0.20;
+      } else {
+        tax = 150000.0 + (income - 1500000) * 0.30;
+      }
+
+      if (income <= 700000) {
+        tax = tax > 25000 ? tax - 25000 : 0.0;
+      }
     }
 
     return tax + (tax * 0.04);
@@ -1030,10 +1329,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     } else if (income <= 1000000) {
       tax = (500000.0 - exemptionLimit) * 0.05 + (income - 500000) * 0.20;
     } else {
-      tax =
-          (500000.0 - exemptionLimit) * 0.05 +
-          500000.0 * 0.20 +
-          (income - 1000000) * 0.30;
+      tax = (500000.0 - exemptionLimit) * 0.05 + 500000.0 * 0.20 + (income - 1000000) * 0.30;
     }
 
     if (income <= 500000) {
@@ -1053,7 +1349,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
 
   void resetAll() {
     setState(() {
-      businessIncomeController.clear();
+      businessIncomeController.text = totalEarnings.toStringAsFixed(0);
       otherIncomeController.clear();
       ppfController.clear();
       elssController.clear();
@@ -1077,6 +1373,8 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       showResults = false;
       newRegimeTax = 0.0;
       oldRegimeTax = 0.0;
+      businessExpenses.clear();
+      assets.clear();
     });
   }
 
@@ -1085,7 +1383,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
 
     try {
       TaxCalculationModel calculation = TaxCalculationModel(
-        fiscalYear: fiscalYear,
+        fiscalYear: selectedFiscalYear,
         businessIncome: parseDouble(businessIncomeController.text),
         otherIncome: parseDouble(otherIncomeController.text),
         grossIncome: getGrossIncome(),
@@ -1103,9 +1401,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         newRegimeTax: newRegimeTax,
         oldRegimeTax: oldRegimeTax,
         recommendedRegime: newRegimeTax <= oldRegimeTax ? 'new' : 'old',
-        recommendedTax: newRegimeTax <= oldRegimeTax
-            ? newRegimeTax
-            : oldRegimeTax,
+        recommendedTax: newRegimeTax <= oldRegimeTax ? newRegimeTax : oldRegimeTax,
         potentialSavings: (newRegimeTax - oldRegimeTax).abs(),
       );
 
@@ -1119,87 +1415,105 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   void _showAddExpenseDialog() {
     TextEditingController nameController = TextEditingController();
     TextEditingController amountController = TextEditingController();
+    String selectedType = 'Office Rent';
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text(
-          'Add Business Expense',
-          style: TextStyle(color: Colors.white, fontSize: 18),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Expense Name',
-                labelStyle: const TextStyle(color: Colors.white70),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.1),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E2E),
+          title: const Text('Add Business Expense', style: TextStyle(color: Colors.white, fontSize: 18)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                value: selectedType,
+                dropdownColor: const Color(0xFF1E1E2E),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Expense Type',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'Office Rent', child: Text('🏢 Office Rent')),
+                  DropdownMenuItem(value: 'Electricity', child: Text('⚡ Electricity')),
+                  DropdownMenuItem(value: 'Internet', child: Text('🌐 Internet/Phone')),
+                  DropdownMenuItem(value: 'Supplies', child: Text('📎 Office Supplies')),
+                  DropdownMenuItem(value: 'Professional Fees', child: Text('👔 Professional Fees')),
+                  DropdownMenuItem(value: 'Software', child: Text('💻 Software')),
+                  DropdownMenuItem(value: 'Travel', child: Text('🚗 Travel')),
+                  DropdownMenuItem(value: 'Repairs', child: Text('🔧 Repairs')),
+                  DropdownMenuItem(value: 'Other', child: Text('📦 Other')),
+                ],
+                onChanged: (value) => setState(() => selectedType = value!),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'e.g., Monthly rent',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: amountController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Amount (Annual)',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  prefixText: '₹ ',
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: amountController,
-              keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'Amount (₹)',
-                labelStyle: const TextStyle(color: Colors.white70),
-                prefixText: '₹ ',
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.1),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-              ),
+            ElevatedButton(
+              onPressed: () {
+                if (nameController.text.isNotEmpty && amountController.text.isNotEmpty) {
+                  double amount = double.parse(amountController.text);
+                  BusinessExpense expense = BusinessExpense(
+                    name: nameController.text,
+                    amount: amount,
+                    expenseDate: DateTime.now(),
+                    category: selectedType,
+                  );
+                  this.setState(() => businessExpenses.add(expense));
+                  ToastService.showSuccess(context, 'Expense added successfully!');
+                  Navigator.pop(context);
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B8CFF)),
+              child: const Text('Add'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white70),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nameController.text.isNotEmpty &&
-                  amountController.text.isNotEmpty) {
-                double amount = double.parse(amountController.text);
-                BusinessExpense expense = BusinessExpense(
-                  name: nameController.text,
-                  amount: amount,
-                  expenseDate: DateTime.now(),
-                );
-
-                setState(() {
-                  businessExpenses.add(expense);
-                });
-
-                ToastService.showSuccess(
-                  context,
-                  'Expense added successfully!',
-                );
-                Navigator.pop(context);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5B8CFF),
-            ),
-            child: const Text('Add'),
-          ),
-        ],
       ),
     );
   }
@@ -1213,31 +1527,13 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1E2E),
-        title: const Text(
-          'Add Asset',
-          style: TextStyle(color: Colors.white, fontSize: 18),
-        ),
+        title: const Text('Add Asset', style: TextStyle(color: Colors.white, fontSize: 18)),
         content: StatefulBuilder(
           builder: (context, setState) => Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextField(
-                controller: nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  labelText: 'Asset Name',
-                  labelStyle: const TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white.withOpacity(0.1),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                initialValue: selectedType,
+                value: selectedType,
                 dropdownColor: const Color(0xFF1E1E2E),
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
@@ -1251,20 +1547,31 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   ),
                 ),
                 items: const [
-                  DropdownMenuItem(
-                    value: 'Computer',
-                    child: Text('Computer (40%)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Furniture',
-                    child: Text('Furniture (10%)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Machinery',
-                    child: Text('Machinery (15%)'),
-                  ),
+                  DropdownMenuItem(value: 'Computer', child: Text('💻 Computer/Laptop (40%)')),
+                  DropdownMenuItem(value: 'Software', child: Text('📀 Software (40%)')),
+                  DropdownMenuItem(value: 'Furniture', child: Text('🪑 Furniture (10%)')),
+                  DropdownMenuItem(value: 'Machinery', child: Text('⚙️ Machinery (15%)')),
+                  DropdownMenuItem(value: 'Vehicle', child: Text('🚗 Vehicle (15%)')),
+                  DropdownMenuItem(value: 'Intangible', child: Text('📝 Intangible (25%)')),
                 ],
                 onChanged: (value) => setState(() => selectedType = value!),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                  hintText: 'e.g., MacBook Pro',
+                  labelStyle: const TextStyle(color: Colors.white70),
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -1272,7 +1579,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                 keyboardType: TextInputType.number,
                 style: const TextStyle(color: Colors.white),
                 decoration: InputDecoration(
-                  labelText: 'Asset Value (₹)',
+                  labelText: 'Purchase Price (₹)',
                   labelStyle: const TextStyle(color: Colors.white70),
                   prefixText: '₹ ',
                   filled: true,
@@ -1289,20 +1596,29 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.white70),
-            ),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
           ),
           ElevatedButton(
             onPressed: () {
-              if (nameController.text.isNotEmpty &&
-                  valueController.text.isNotEmpty) {
-                double rate = selectedType == 'Computer'
-                    ? 40.0
-                    : (selectedType == 'Furniture' ? 10.0 : 15.0);
+              if (nameController.text.isNotEmpty && valueController.text.isNotEmpty) {
+                double rate = 0;
+                switch (selectedType) {
+                  case 'Computer':
+                  case 'Software':
+                    rate = 40.0;
+                    break;
+                  case 'Furniture':
+                    rate = 10.0;
+                    break;
+                  case 'Machinery':
+                  case 'Vehicle':
+                    rate = 15.0;
+                    break;
+                  case 'Intangible':
+                    rate = 25.0;
+                    break;
+                }
                 double value = double.parse(valueController.text);
-
                 Asset asset = Asset(
                   name: nameController.text,
                   type: selectedType,
@@ -1310,21 +1626,32 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   rate: rate,
                   purchaseDate: DateTime.now(),
                 );
-
-                setState(() {
-                  assets.add(asset);
-                });
-
+                this.setState(() => assets.add(asset));
                 ToastService.showSuccess(context, 'Asset added successfully!');
                 Navigator.pop(context);
               }
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF5B8CFF),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B8CFF)),
             child: const Text('Add'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showFiscalYearSelector() {
+    showDialog(
+      context: context,
+      builder: (context) => FiscalYearSelector(
+        currentFiscalYear: selectedFiscalYear,
+        onYearSelected: (year) {
+          setState(() {
+            selectedFiscalYear = year;
+            selectedAssessmentYear = '${int.parse(year.split('-')[0]) + 1}-${(int.parse(year.split('-')[1]) + 1).toString().substring(2)}';
+          });
+          _loadInvoiceData();
+          _loadSavedData();
+        },
       ),
     );
   }
@@ -1334,11 +1661,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final padding = screenWidth > 600 ? 24.0 : 16.0;
 
+    double taxableIncomeOld = getTaxableIncomeOld();
+    double taxableIncomeNew = getTaxableIncomeNew();
+    double totalTaxLiability = showResults ? (newRegimeTax <= oldRegimeTax ? newRegimeTax : oldRegimeTax) : 0;
+    double effectiveTaxRate = totalEarnings > 0 ? (totalTaxLiability / totalEarnings * 100) : 0;
+
     return LoadingOverlay(
       isLoading: _isLoading || _isSaving,
-      loadingMessage: _isLoading
-          ? _loadingMessage
-          : (_isSaving ? 'Saving your data...' : null),
+      loadingMessage: _isLoading ? _loadingMessage : (_isSaving ? 'Saving your data...' : null),
       child: Scaffold(
         backgroundColor: const Color(0xFF05060A),
         body: Stack(
@@ -1346,22 +1676,12 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             Positioned(
               top: -120,
               left: -100,
-              child: _liquidBlob(
-                width: 320.0,
-                height: 420.0,
-                color: const Color(0xFF9333EA),
-                opacity: 0.28,
-              ),
+              child: _liquidBlob(width: 320.0, height: 420.0, color: const Color(0xFF9333EA), opacity: 0.28),
             ),
             Positioned(
               bottom: -160,
               right: -120,
-              child: _liquidBlob(
-                width: 380.0,
-                height: 460.0,
-                color: const Color(0xFF3B82F6),
-                opacity: 0.26,
-              ),
+              child: _liquidBlob(width: 380.0, height: 460.0, color: const Color(0xFF3B82F6), opacity: 0.26),
             ),
             SafeArea(
               child: Column(
@@ -1369,14 +1689,20 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   _header(),
                   Expanded(
                     child: SingleChildScrollView(
-                      padding: EdgeInsets.fromLTRB(
-                        padding,
-                        padding,
-                        padding,
-                        120,
-                      ),
+                      padding: EdgeInsets.fromLTRB(padding, padding, padding, 120),
                       child: Column(
                         children: [
+                          if (showResults)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 16),
+                              child: TaxSummaryCard(
+                                grossIncome: getGrossIncome(),
+                                taxableIncome: selectedRegime == 'new' ? taxableIncomeNew : taxableIncomeOld,
+                                totalTaxLiability: totalTaxLiability,
+                                effectiveTaxRate: effectiveTaxRate,
+                                fiscalYear: selectedFiscalYear,
+                              ),
+                            ),
                           _glassCard(child: _buildFiscalYearHeader()),
                           const SizedBox(height: 16),
                           _glassCard(child: _buildTaxCalculatorSection()),
@@ -1396,21 +1722,57 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   }
 
   Widget _buildFiscalYearHeader() {
+    List<MapEntry<String, double>> monthlyData = monthlyEarnings.entries.toList()
+      ..sort((a, b) => DateFormat('MMM yyyy').parse(a.key).compareTo(DateFormat('MMM yyyy').parse(b.key)));
+
+    while (monthlyData.length < 12) {
+      monthlyData.add(MapEntry('No Data', 0.0));
+    }
+
+    if (monthlyData.length > 12) {
+      monthlyData = monthlyData.sublist(monthlyData.length - 12);
+    }
+
+    double maxMonthlyEarning = monthlyEarnings.values.isNotEmpty
+        ? monthlyEarnings.values.reduce((a, b) => a > b ? a : b)
+        : 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Fiscal Year Earnings',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Fiscal Year \nEarnings',
+              style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+            GestureDetector(
+              onTap: _showFiscalYearSelector,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Color(0xFF5B8CFF), Color(0xFF9333EA)]),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      'FY $selectedFiscalYear',
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.arrow_drop_down, color: Colors.white, size: 16),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 4),
         Text(
-          'FY $fiscalYear (Current)',
-          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14),
+          'Assessment Year: ${int.parse(selectedFiscalYear.split('-')[0]) + 1}-${(int.parse(selectedFiscalYear.split('-')[1]) + 1).toString().substring(2)}',
+          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
         ),
         const SizedBox(height: 16),
         Container(
@@ -1429,11 +1791,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   color: const Color(0xFFFBBF24).withOpacity(0.2),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.info_outline,
-                  color: Color(0xFFFBBF24),
-                  size: 20,
-                ),
+                child: const Icon(Icons.info_outline, color: Color(0xFFFBBF24), size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1441,23 +1799,26 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'GST Status: Zero-Rated [Export Services]',
-                      style: TextStyle(
-                        color: Color(0xFFFBBF24),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 13,
-                      ),
+                      'GST Status: Zero-Rated (Export Services)',
+                      style: TextStyle(color: Color(0xFFFBBF24), fontWeight: FontWeight.w500, fontSize: 13),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'As a self-employed professional earning in USD from foreign clients, your export of services is zero-rated under GST (Section 28(1) GST Act). No GST payable on foreign earnings.',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 11,
-                        height: 1.4,
-                      ),
+                      'As a self-employed professional earning in USD from foreign clients, your export of services is zero-rated under GST (Section 2(6) IGST Act). No GST payable on foreign earnings.',
+                      style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11, height: 1.4),
                     ),
                   ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'NIL GST',
+                  style: TextStyle(color: Color(0xFFFBBF24), fontSize: 10, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -1466,53 +1827,35 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         const SizedBox(height: 20),
         Row(
           children: [
-            Expanded(
-              child: _statCard(
-                label: 'Total Earnings',
-                value: totalEarnings,
-                color: Colors.white,
-              ),
-            ),
-            Expanded(
-              child: _statCard(
-                label: 'Paid Invoices',
-                value: paidInvoices,
-                color: const Color(0xFF22C55E),
-              ),
-            ),
-            Expanded(
-              child: _statCard(
-                label: 'Pending',
-                value: pendingInvoices,
-                color: const Color(0xFFEF4444),
-              ),
-            ),
+            Expanded(child: _statCard(label: 'Total Earnings', value: '₹${_formatNumber(totalEarnings.round())}', color: Colors.white)),
+            Expanded(child: _statCard(label: 'Paid Invoices', value: '₹${_formatNumber(paidInvoices.round())}', color: const Color(0xFF22C55E))),
+            Expanded(child: _statCard(label: 'Pending', value: '₹${_formatNumber(pendingInvoices.round())}', color: const Color(0xFFEF4444))),
+            Expanded(child: _statCard(label: 'Invoices', value: monthlyEarnings.length.toString(), color: const Color(0xFF5B8CFF))),
           ],
         ),
         const SizedBox(height: 16),
         const Text(
           'Monthly Earnings Trend',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
+          style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
         ),
         const SizedBox(height: 8),
         SizedBox(
-          height: 60,
+          height: 80,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            itemCount: 12,
+            itemCount: monthlyData.length,
             itemBuilder: (context, index) {
+              double value = monthlyData[index].value;
+              double percentage = maxMonthlyEarning > 0 ? value / maxMonthlyEarning : 0.1;
+              String monthLabel = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar'][index];
               return Container(
-                width: 28,
+                width: 32,
                 margin: const EdgeInsets.only(right: 4),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Container(
-                      height: (index + 1) * 3.0,
+                      height: 50 * percentage.clamp(0.1, 1.0),
                       width: 20,
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
@@ -1525,11 +1868,8 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'M${index + 1}',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.5),
-                        fontSize: 8,
-                      ),
+                      monthLabel,
+                      style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 8),
                     ),
                   ],
                 ),
@@ -1552,30 +1892,13 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('🧮', style: TextStyle(fontSize: 20)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Tax Calculator',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Tax Calculator', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
               ],
             ),
             Row(
               children: [
-                IconButton(
-                  icon: const Icon(Icons.save, color: Colors.white70, size: 20),
-                  onPressed: _saveAllData,
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.refresh,
-                    color: Colors.white70,
-                    size: 20,
-                  ),
-                  onPressed: resetAll,
-                ),
+                IconButton(icon: const Icon(Icons.save, color: Colors.white70, size: 20), onPressed: _saveAllData),
+                IconButton(icon: const Icon(Icons.refresh, color: Colors.white70, size: 20), onPressed: resetAll),
               ],
             ),
           ],
@@ -1585,8 +1908,6 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         const SizedBox(height: 20),
         _buildTaxSettings(),
         const SizedBox(height: 20),
-        if (selectedRegime == 'old') _buildDeductionsColumn(),
-        const SizedBox(height: 20),
         Row(
           children: [
             Expanded(
@@ -1595,18 +1916,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   backgroundColor: const Color(0xFF5B8CFF),
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: () {
+                onPressed: () async {
                   calculateTax();
-                  _saveCalculationToHistory();
+                  await Future.delayed(const Duration(milliseconds: 50));
+                  await _saveCalculationToHistory();
                 },
-                child: const Text(
-                  'Calculate Tax',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                ),
+                child: const Text('Calculate Tax', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
               ),
             ),
             const SizedBox(width: 12),
@@ -1616,15 +1933,10 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                   foregroundColor: Colors.white70,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   side: BorderSide(color: Colors.white.withOpacity(0.2)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: resetAll,
-                child: const Text(
-                  'Reset',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                ),
+                child: const Text('Reset', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
               ),
             ),
           ],
@@ -1646,14 +1958,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('💎', style: TextStyle(fontSize: 20)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Deductions & Tax Savings',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Deductions & Tax Savings', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
               ],
             ),
           ],
@@ -1684,21 +1989,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           children: [
             const Text('📊', style: TextStyle(fontSize: 16)),
             const SizedBox(width: 8),
-            const Text(
-              'Income Details',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            const Text('Income Details', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 12),
         _buildInputField(
           label: 'Business/Professional Income',
           controller: businessIncomeController,
-          hint: 'Pre-filled from your invoice earnings',
+          hint: 'Auto-filled from your invoices',
         ),
         const SizedBox(height: 12),
         _buildInputField(
@@ -1716,21 +2014,8 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Gross Income:',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              Text(
-                '₹${getGrossIncome().toStringAsFixed(0)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              const Text('Gross Income:', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500)),
+              Text('₹${getGrossIncome().toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
             ],
           ),
         ),
@@ -1746,14 +2031,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           children: [
             const Text('⚙️', style: TextStyle(fontSize: 16)),
             const SizedBox(width: 8),
-            const Text(
-              'Tax Settings',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            const Text('Tax Settings', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 12),
@@ -1769,17 +2047,13 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                 label: 'Tax Regime',
                 value: selectedRegime,
                 items: const [
-                  DropdownMenuItem(
-                    value: 'new',
-                    child: Text('New Regime (Recommended)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'old',
-                    child: Text('Old Regime (With Deductions)'),
-                  ),
+                  DropdownMenuItem(value: 'new', child: Text('New Regime (Recommended)')),
+                  DropdownMenuItem(value: 'old', child: Text('Old Regime (With Deductions)')),
                 ],
                 onChanged: (value) {
-                  setState(() => selectedRegime = value!);
+                  setState(() {
+                    selectedRegime = value!;
+                  });
                 },
               ),
               const SizedBox(height: 12),
@@ -1787,82 +2061,33 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                 label: 'Age Category',
                 value: selectedAgeGroup,
                 items: const [
-                  DropdownMenuItem(
-                    value: 'below_60',
-                    child: Text('Below 60 years'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'senior_citizen',
-                    child: Text('Senior Citizen (60-80)'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'super_senior',
-                    child: Text('Super Senior (80+)'),
-                  ),
+                  DropdownMenuItem(value: 'below_60', child: Text('Below 60 years')),
+                  DropdownMenuItem(value: 'senior_citizen', child: Text('Senior Citizen (60-80)')),
+                  DropdownMenuItem(value: 'super_senior', child: Text('Super Senior (80+)')),
                 ],
                 onChanged: (value) {
-                  setState(() => selectedAgeGroup = value!);
+                  setState(() {
+                    selectedAgeGroup = value!;
+                  });
                 },
               ),
               const SizedBox(height: 12),
               _buildDropdown(
                 label: 'Assessment Year',
                 value: selectedAssessmentYear,
-                items: const [
-                  DropdownMenuItem(
-                    value: '2025-26',
-                    child: Text('AY 2026-27 (FY 2025-26)'),
-                  ),
-                  DropdownMenuItem(
-                    value: '2024-25',
-                    child: Text('AY 2025-26 (FY 2024-25)'),
-                  ),
+                items: [
+                  DropdownMenuItem(value: '2025-26', child: Text('AY 2026-27 (FY 2025-26)')),
+                  DropdownMenuItem(value: '2024-25', child: Text('AY 2025-26 (FY 2024-25)')),
                 ],
                 onChanged: (value) {
-                  setState(() => selectedAssessmentYear = value!);
+                  setState(() {
+                    selectedAssessmentYear = value!;
+                  });
                 },
               ),
             ],
           ),
         ),
-      ],
-    );
-  }
-
-  Widget _buildDeductionsColumn() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Text('💎', style: TextStyle(fontSize: 16)),
-            const SizedBox(width: 8),
-            const Text(
-              'Deductions (Old Regime)',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        _buildInputField(
-          label: 'Section 80C (Max ₹1.5L)',
-          controller: ppfController,
-          hint: 'PPF, ELSS, LIC, etc.',
-          maxLimit: 150000,
-        ),
-        const SizedBox(height: 12),
-        _buildInputField(
-          label: 'Section 80D (Health Insurance)',
-          controller: healthSelfController,
-          hint: 'Max ₹25,000',
-          maxLimit: 100000,
-        ),
-        const SizedBox(height: 12),
-        _buildInputField(label: 'Other Deductions', controller: npsController),
       ],
     );
   }
@@ -1875,13 +2100,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           children: [
             const Text('⚙️', style: TextStyle(fontSize: 14)),
             const SizedBox(width: 8),
-            Text(
-              'Expense Calculation Mode:',
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
-                fontSize: 14,
-              ),
-            ),
+            Text('Expense Calculation Mode:', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14)),
           ],
         ),
         const SizedBox(height: 8),
@@ -1915,22 +2134,14 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.info_outline,
-                color: Color(0xFFFBBF24),
-                size: 16,
-              ),
+              const Icon(Icons.info_outline, color: Color(0xFFFBBF24), size: 16),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   isPresumptiveMode
-                      ? 'Section 44ADA: 50% of your gross receipts is automatically considered as business expenses. No need to maintain detailed books.'
-                      : 'Enter your actual business expenses below for more accurate tax calculation.',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
+                      ? 'Section 44ADA: 50% of your gross receipts is automatically considered as business expenses. No need to maintain detailed books. Simpler compliance.'
+                      : 'Actual Expenses: Claim actual business expenses like rent, utilities, and equipment. Requires maintaining books of accounts.',
+                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, height: 1.4),
                 ),
               ),
             ],
@@ -1940,28 +2151,16 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     );
   }
 
-  Widget _buildModeButton({
-    required String label,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
+  Widget _buildModeButton({required String label, required bool isActive, required VoidCallback onTap}) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          gradient: isActive
-              ? const LinearGradient(
-                  colors: [Color(0xFF5B8CFF), Color(0xFF9333EA)],
-                )
-              : null,
+          gradient: isActive ? const LinearGradient(colors: [Color(0xFF5B8CFF), Color(0xFF9333EA)]) : null,
           color: isActive ? null : Colors.white.withOpacity(0.05),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isActive
-                ? Colors.transparent
-                : Colors.white.withOpacity(0.1),
-          ),
+          border: Border.all(color: isActive ? Colors.transparent : Colors.white.withOpacity(0.1)),
         ),
         child: Text(
           label,
@@ -1987,74 +2186,91 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('📋', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Business Expenses',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Business Expenses', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
-            _buildAddButton(
-              label: '+ Add Expense',
-              onTap: _showAddExpenseDialog,
-            ),
+            _buildAddButton(label: '+ Add Expense', onTap: _showAddExpenseDialog),
           ],
         ),
         const SizedBox(height: 12),
-        ...businessExpenses
-            .map(
-              (expense) => Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
+        ...businessExpenses.map((expense) => Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: const Color(0xFF5B8CFF).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Center(
+                  child: Text(
+                    _getExpenseIcon(expense.category ?? 'Other'),
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      expense.name,
-                      style: const TextStyle(color: Colors.white),
+                      expense.category ?? 'Expense',
+                      style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                     ),
                     Text(
-                      '₹${expense.amount.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontWeight: FontWeight.w500,
-                      ),
+                      expense.name,
+                      style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
                     ),
                   ],
                 ),
               ),
-            )
-            ,
+              Text(
+                '₹${expense.amount.toStringAsFixed(0)}',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70, size: 16),
+                onPressed: () {
+                  setState(() {
+                    businessExpenses.remove(expense);
+                  });
+                },
+              ),
+            ],
+          ),
+        )),
         const Divider(color: Colors.white10, height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Total Business Expenses:',
-              style: TextStyle(
-                color: Colors.white70,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            Text(
-              '₹${getTotalBusinessExpenses().toStringAsFixed(0)}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            const Text('Total Business Expenses:', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500)),
+            Text('₹${getTotalBusinessExpenses().toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
       ],
     );
+  }
+
+  String _getExpenseIcon(String category) {
+    switch (category) {
+      case 'Office Rent': return '🏢';
+      case 'Electricity': return '⚡';
+      case 'Internet': return '🌐';
+      case 'Supplies': return '📎';
+      case 'Professional Fees': return '👔';
+      case 'Software': return '💻';
+      case 'Travel': return '🚗';
+      case 'Repairs': return '🔧';
+      default: return '📦';
+    }
   }
 
   Widget _buildDepreciation() {
@@ -2068,14 +2284,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('🖥️', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Depreciation on Assets',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Depreciation on Assets', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
             _buildAddButton(label: '+ Add Asset', onTap: _showAddAssetDialog),
@@ -2092,106 +2301,120 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.info_outline,
-                color: Color(0xFF3B82F6),
-                size: 16,
-              ),
+              const Icon(Icons.info_outline, color: Color(0xFF3B82F6), size: 16),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Depreciation is calculated using Written Down Value (WDV) method. Rates: Computers 40%, Furniture 10%, Machinery 15%',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
-                    fontSize: 11,
-                    height: 1.4,
-                  ),
+                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11, height: 1.4),
                 ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 12),
-        ...assets
-            .map(
-              (asset) => Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding: const EdgeInsets.all(12),
+        ...assets.map((asset) => Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
+                  color: const Color(0xFF3B82F6).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
+                child: Center(
+                  child: Text(
+                    _getAssetIcon(asset.type),
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
                           asset.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
                         ),
-                        Text(
-                          '${asset.rate.toStringAsFixed(0)}%',
-                          style: const TextStyle(
-                            color: Color(0xFF3B82F6),
-                            fontWeight: FontWeight.w600,
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFBBF24).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '${asset.rate.toStringAsFixed(0)}%',
+                            style: const TextStyle(color: Color(0xFFFBBF24), fontSize: 9, fontWeight: FontWeight.w500),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Value: ₹${asset.value.toStringAsFixed(0)}',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.6),
-                            fontSize: 12,
-                          ),
-                        ),
-                        Text(
-                          'Dep: ₹${(asset.value * asset.rate / 100).toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            color: Color(0xFF22C55E),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 2),
+                    Text(
+                      'WDV: ₹${asset.value.toStringAsFixed(0)}',
+                      style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
                     ),
                   ],
                 ),
               ),
-            )
-            ,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '₹${(asset.value * asset.rate / 100).toStringAsFixed(0)}',
+                    style: const TextStyle(color: Color(0xFF22C55E), fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    'Depreciation',
+                    style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 8),
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70, size: 16),
+                onPressed: () {
+                  setState(() {
+                    assets.remove(asset);
+                  });
+                },
+              ),
+            ],
+          ),
+        )),
         const Divider(color: Colors.white10, height: 20),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Annual Depreciation:',
-              style: TextStyle(
-                color: Colors.white70,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            Text(
-              '₹${getTotalDepreciation().toStringAsFixed(0)}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            const Text('Annual Depreciation:', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w500)),
+            Text('₹${getTotalDepreciation().toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
       ],
     );
+  }
+
+  String _getAssetIcon(String type) {
+    switch (type) {
+      case 'Computer': return '💻';
+      case 'Software': return '📀';
+      case 'Furniture': return '🪑';
+      case 'Machinery': return '⚙️';
+      case 'Vehicle': return '🚗';
+      case 'Intangible': return '📝';
+      default: return '📦';
+    }
   }
 
   Widget _buildSection80C() {
@@ -2208,14 +2431,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('💰', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Section 80C \nInvestments',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Section 80C \nInvestments', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
             Container(
@@ -2227,9 +2443,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               child: Text(
                 '₹${total80C.toStringAsFixed(0)} / ₹1,50,000',
                 style: TextStyle(
-                  color: total80C >= 150000
-                      ? const Color(0xFF22C55E)
-                      : Colors.white70,
+                  color: total80C >= 150000 ? const Color(0xFF22C55E) : Colors.white70,
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
@@ -2244,9 +2458,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             value: progress > 1 ? 1.0 : progress,
             backgroundColor: Colors.white.withOpacity(0.1),
             valueColor: AlwaysStoppedAnimation<Color>(
-              total80C >= 150000
-                  ? const Color(0xFF22C55E)
-                  : const Color(0xFF5B8CFF),
+              total80C >= 150000 ? const Color(0xFF22C55E) : const Color(0xFF5B8CFF),
             ),
             minHeight: 6,
           ),
@@ -2266,10 +2478,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             _buildDeductionInput('EPF/VPF', epfController),
             _buildDeductionInput('NSC', nscController),
             _buildDeductionInput('Tax Saver FD', fdController),
-            _buildDeductionInput(
-              'Home Loan Principal',
-              homeLoanPrincipalController,
-            ),
+            _buildDeductionInput('Home Loan Principal', homeLoanPrincipalController),
             _buildDeductionInput('Children Tuition', tuitionController),
           ],
         ),
@@ -2291,14 +2500,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               children: [
                 const Text('🏥', style: TextStyle(fontSize: 16)),
                 const SizedBox(width: 8),
-                const Text(
-                  'Section 80D \nHealth Insurance',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                const Text('Section 80D Health \nInsurance', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
               ],
             ),
             Container(
@@ -2310,9 +2512,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               child: Text(
                 '₹${total80D.toStringAsFixed(0)} / ₹1,00,000',
                 style: TextStyle(
-                  color: total80D >= 100000
-                      ? const Color(0xFF22C55E)
-                      : Colors.white70,
+                  color: total80D >= 100000 ? const Color(0xFF22C55E) : Colors.white70,
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
@@ -2327,31 +2527,17 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             value: progress > 1 ? 1.0 : progress,
             backgroundColor: Colors.white.withOpacity(0.1),
             valueColor: AlwaysStoppedAnimation<Color>(
-              total80D >= 100000
-                  ? const Color(0xFF22C55E)
-                  : const Color(0xFF5B8CFF),
+              total80D >= 100000 ? const Color(0xFF22C55E) : const Color(0xFF5B8CFF),
             ),
             minHeight: 6,
           ),
         ),
         const SizedBox(height: 16),
-        _buildDeductionInput(
-          'Self/Family Premium',
-          healthSelfController,
-          hint: 'Max ₹25,000',
-        ),
+        _buildDeductionInput('Self/Family Premium', healthSelfController, hint: 'Max ₹25,000 (₹50,000 if senior)'),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Parents Premium',
-          healthParentsController,
-          hint: 'Max ₹25,000 (₹50,000 if senior)',
-        ),
+        _buildDeductionInput('Parents Premium', healthParentsController, hint: 'Max ₹25,000 (₹50,000 if senior parents)'),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Preventive Health Checkup',
-          healthCheckupController,
-          hint: 'Max ₹5,000',
-        ),
+        _buildDeductionInput('Preventive Health Checkup', healthCheckupController, hint: 'Max ₹5,000'),
       ],
     );
   }
@@ -2364,46 +2550,19 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           children: [
             const Text('📑', style: TextStyle(fontSize: 16)),
             const SizedBox(width: 8),
-            const Text(
-              'Other Deductions',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            const Text('Other Deductions', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
           ],
         ),
         const SizedBox(height: 16),
-        _buildDeductionInput(
-          'NPS - 80CCD(1B)',
-          npsController,
-          hint: 'Additional ₹50,000 over 80C',
-        ),
+        _buildDeductionInput('NPS - 80CCD(1B)', npsController, hint: 'Additional ₹50,000 over 80C', maxLimit: 50000),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Home Loan Interest - 24(b)',
-          homeLoanInterestController,
-          hint: 'Max ₹2,00,000 for self-occupied',
-        ),
+        _buildDeductionInput('Home Loan Interest - 24(b)', homeLoanInterestController, hint: 'Max ₹2,00,000 for self-occupied', maxLimit: 200000),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Education Loan Interest - 80E',
-          educationLoanController,
-          hint: 'No limit (up to 8 years)',
-        ),
+        _buildDeductionInput('Education Loan Interest - 80E', educationLoanController, hint: 'No limit (up to 8 years)'),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Donations - 80G',
-          donationsController,
-          hint: '50-100% based on fund',
-        ),
+        _buildDeductionInput('Donations - 80G', donationsController, hint: '50-100% based on fund'),
         const SizedBox(height: 12),
-        _buildDeductionInput(
-          'Savings Interest - 80TTA',
-          savingsInterestController,
-          hint: 'Max ₹10,000',
-        ),
+        _buildDeductionInput('Savings Interest - 80TTA', savingsInterestController, hint: 'Max ₹10,000', maxLimit: 10000),
       ],
     );
   }
@@ -2411,8 +2570,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
   Widget _buildDeductionsSummary() {
     double businessExpense = getTotalBusinessExpenses();
     double depreciation = getTotalDepreciation();
-    double chapterVia =
-        getTotal80C() + getTotal80D() + getTotalOtherDeductions();
+    double chapterVia = getTotal80C() + getTotal80D() + getTotalOtherDeductions();
     double total = businessExpense + depreciation + chapterVia;
 
     return Container(
@@ -2421,10 +2579,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.1),
-            Colors.white.withOpacity(0.05),
-          ],
+          colors: [Colors.white.withOpacity(0.1), Colors.white.withOpacity(0.05)],
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
@@ -2434,85 +2589,32 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Business Expenses / Presumptive (50%):',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
-                  fontSize: 12,
-                ),
-              ),
-              Text(
-                '₹${businessExpense.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
+              Text('Business Expenses / \nPresumptive (50%):', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+              Text('₹${businessExpense.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Depreciation:',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
-                  fontSize: 12,
-                ),
-              ),
-              Text(
-                '₹${depreciation.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
+              Text('Depreciation:', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+              Text('₹${depreciation.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight:FontWeight.w500, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Chapter VI-A Deductions:',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
-                  fontSize: 12,
-                ),
-              ),
-              Text(
-                '₹${chapterVia.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 13,
-                ),
-              ),
+              Text('Chapter VI-A Deductions \n(80C + 80D + Other):', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+              Text('₹${chapterVia.toStringAsFixed(0)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 13)),
             ],
           ),
           const Divider(color: Colors.white10, height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'Total Tax Savings \nDeductions:',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                '₹${total.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  color: Color(0xFF22C55E),
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+              const Text('Total Tax Savings \nDeductions:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+              Text('₹${total.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF22C55E), fontSize: 18, fontWeight: FontWeight.w700)),
             ],
           ),
           const SizedBox(height: 8),
@@ -2524,11 +2626,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             ),
             child: const Text(
               '⚠️ Most deductions only apply under Old Tax Regime. The calculator will compare both regimes.',
-              style: TextStyle(
-                color: Color(0xFFFBBF24),
-                fontSize: 10,
-                height: 1.4,
-              ),
+              style: TextStyle(color: Color(0xFFFBBF24), fontSize: 10, height: 1.4),
               textAlign: TextAlign.center,
             ),
           ),
@@ -2539,9 +2637,8 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
 
   Widget _buildResults() {
     String recommendedRegime = newRegimeTax <= oldRegimeTax ? 'New' : 'Old';
-    Color recommendedColor = recommendedRegime == 'New'
-        ? const Color(0xFF5B8CFF)
-        : const Color(0xFF9333EA);
+    Color recommendedColor = recommendedRegime == 'New' ? const Color(0xFF5B8CFF) : const Color(0xFF9333EA);
+    double savings = (newRegimeTax - oldRegimeTax).abs();
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -2549,10 +2646,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.1),
-            Colors.white.withOpacity(0.05),
-          ],
+          colors: [Colors.white.withOpacity(0.1), Colors.white.withOpacity(0.05)],
         ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.1)),
@@ -2564,14 +2658,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             children: [
               const Text('📋', style: TextStyle(fontSize: 18)),
               const SizedBox(width: 8),
-              const Text(
-                'Tax Calculation Results',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              const Text('Tax Calculation Results', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
             ],
           ),
           const SizedBox(height: 16),
@@ -2584,29 +2671,36 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                     color: const Color(0xFF5B8CFF).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: recommendedRegime == 'New'
-                          ? const Color(0xFF5B8CFF)
-                          : Colors.white.withOpacity(0.1),
+                      color: recommendedRegime == 'New' ? const Color(0xFF5B8CFF) : Colors.white.withOpacity(0.1),
                       width: recommendedRegime == 'New' ? 2 : 1,
                     ),
                   ),
-                  child: Column(
+                  child: Stack(
                     children: [
-                      const Text(
-                        'New Regime',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      Column(
+                        children: [
+                          const Text('New Regime', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          const SizedBox(height: 4),
+                          Text(
+                            '₹${newRegimeTax.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              color: recommendedRegime == 'New' ? const Color(0xFF5B8CFF) : Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            '${(newRegimeTax / getGrossIncome() * 100).toStringAsFixed(1)}%',
+                            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₹${newRegimeTax.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          color: recommendedRegime == 'New'
-                              ? const Color(0xFF5B8CFF)
-                              : Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                      if (recommendedRegime == 'New')
+                        const Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Icon(Icons.check_circle, color: Color(0xFF5B8CFF), size: 16),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -2619,29 +2713,36 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                     color: const Color(0xFF9333EA).withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: recommendedRegime == 'Old'
-                          ? const Color(0xFF9333EA)
-                          : Colors.white.withOpacity(0.1),
+                      color: recommendedRegime == 'Old' ? const Color(0xFF9333EA) : Colors.white.withOpacity(0.1),
                       width: recommendedRegime == 'Old' ? 2 : 1,
                     ),
                   ),
-                  child: Column(
+                  child: Stack(
                     children: [
-                      const Text(
-                        'Old Regime',
-                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      Column(
+                        children: [
+                          const Text('Old Regime', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                          const SizedBox(height: 4),
+                          Text(
+                            '₹${oldRegimeTax.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              color: recommendedRegime == 'Old' ? const Color(0xFF9333EA) : Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            '${(oldRegimeTax / getGrossIncome() * 100).toStringAsFixed(1)}%',
+                            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '₹${oldRegimeTax.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          color: recommendedRegime == 'Old'
-                              ? const Color(0xFF9333EA)
-                              : Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                      if (recommendedRegime == 'Old')
+                        const Positioned(
+                          top: 4,
+                          right: 4,
+                          child: Icon(Icons.check_circle, color: Color(0xFF9333EA), size: 16),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -2652,43 +2753,101 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  recommendedColor.withOpacity(0.2),
-                  recommendedColor.withOpacity(0.05),
-                ],
-              ),
+              gradient: LinearGradient(colors: [recommendedColor.withOpacity(0.2), recommendedColor.withOpacity(0.05)]),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: recommendedColor.withOpacity(0.3)),
             ),
             child: Row(
               children: [
-                Icon(Icons.star, color: recommendedColor, size: 24),
+                Icon(recommendedRegime == 'New' ? Icons.rocket_launch : Icons.diamond, color: recommendedColor, size: 24),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Recommended: $recommendedRegime Regime',
-                        style: TextStyle(
-                          color: recommendedColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text('$recommendedRegime Tax Regime Recommended', style: TextStyle(color: recommendedColor, fontSize: 14, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       Text(
-                        'You can save ₹${(newRegimeTax - oldRegimeTax).abs().toStringAsFixed(0)} by choosing the $recommendedRegime regime',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 11,
-                          height: 1.4,
-                        ),
+                        'You save ₹${savings.toStringAsFixed(0)} with the $recommendedRegime regime',
+                        style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 11, height: 1.4),
                       ),
                     ],
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              children: [
+                _buildResultRow('Gross Income', getGrossIncome(), Colors.white),
+                _buildResultRow('Standard Deduction', selectedFiscalYear == '2025-26' ? 75000 : 50000, Colors.white70, isNegative: true),
+                if (selectedRegime == 'old' && (getTotal80C() + getTotal80D() + getTotalOtherDeductions()) > 0)
+                  _buildResultRow('Other Deductions', getTotal80C() + getTotal80D() + getTotalOtherDeductions(), const Color(0xFF22C55E), isNegative: true),
+                const Divider(color: Colors.white10, height: 20),
+                _buildResultRow('Taxable Income', selectedRegime == 'new' ? getTaxableIncomeNew() : getTaxableIncomeOld(), Colors.white, isBold: true),
+                _buildResultRow('Tax Before Rebate', selectedRegime == 'new' ? newRegimeTax / 1.04 : oldRegimeTax / 1.04, Colors.white70),
+                if (selectedRegime == 'new' && ((selectedFiscalYear == '2025-26' && getTaxableIncomeNew() <= 1200000) || (selectedFiscalYear == '2024-25' && getTaxableIncomeNew() <= 700000)))
+                  _buildResultRow('Rebate u/s 87A', selectedRegime == 'new' ? (newRegimeTax / 1.04) : 0, const Color(0xFF22C55E), isNegative: true),
+                _buildResultRow('Health & Edu Cess (4%)', (selectedRegime == 'new' ? newRegimeTax : oldRegimeTax) * 0.04 / 1.04, Colors.white70),
+                const Divider(color: Colors.white10, height: 20),
+                _buildResultRow('Total Tax Liability', selectedRegime == 'new' ? newRegimeTax : oldRegimeTax, const Color(0xFFEF4444), isBold: true),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: recommendedColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Tax-Saving Recommendations', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 12),
+                if (recommendedRegime == 'New' && selectedRegime == 'old')
+                  _buildRecommendation(
+                    'HIGH',
+                    'Switch to New Tax Regime — you can save ₹${savings.toStringAsFixed(0)}',
+                    Icons.priority_high,
+                    const Color(0xFFEF4444),
+                  ),
+                if (recommendedRegime == 'Old' && selectedRegime == 'new')
+                  _buildRecommendation(
+                    'HIGH',
+                    'Continue with Old Tax Regime — saves you ₹${savings.toStringAsFixed(0)} with your current deductions',
+                    Icons.priority_high,
+                    const Color(0xFFEF4444),
+                  ),
+                if (selectedRegime == 'old' && getTotal80C() < 150000)
+                  _buildRecommendation(
+                    'MEDIUM',
+                    'Maximize Section 80C Investments — you have ₹${(150000 - getTotal80C()).toStringAsFixed(0)} remaining limit. Invest in PPF, ELSS, or Life Insurance to save more tax.',
+                    Icons.trending_up,
+                    const Color(0xFFFBBF24),
+                  ),
+                if (selectedRegime == 'old' && getTotal80D() < 100000)
+                  _buildRecommendation(
+                    'MEDIUM',
+                    'Utilize Health Insurance Deductions — you can claim additional ₹${(100000 - getTotal80D()).toStringAsFixed(0)} in health insurance premiums.',
+                    Icons.health_and_safety,
+                    const Color(0xFFFBBF24),
+                  ),
+                if (getGrossIncome() > 0)
+                  _buildRecommendation(
+                    'LOW',
+                    'Track Business Expenses — ensure all eligible business expenses are documented: rent, utilities, equipment depreciation.',
+                    Icons.receipt_long,
+                    const Color(0xFF3B82F6),
+                  ),
               ],
             ),
           ),
@@ -2699,23 +2858,87 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               ElevatedButton.icon(
                 onPressed: _saveCalculationToHistory,
                 icon: const Icon(Icons.history, size: 16),
-                label: const Text(
-                  'Save to History',
-                  style: TextStyle(fontSize: 12),
-                ),
+                label: const Text('Save to History', style: TextStyle(fontSize: 12)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white.withOpacity(0.1),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResultRow(String label, double amount, Color color, {bool isNegative = false, bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontSize: 12,
+              fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+          Text(
+            '${isNegative ? '- ' : ''}₹${amount.toStringAsFixed(0)}',
+            style: TextStyle(
+              color: color,
+              fontSize: 13,
+              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecommendation(String priority, String message, IconData icon, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, color: color, size: 14),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  priority,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2731,10 +2954,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-        ),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
         const SizedBox(height: 4),
         Container(
           decoration: BoxDecoration(
@@ -2746,9 +2966,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             controller: controller,
             keyboardType: TextInputType.number,
             style: const TextStyle(color: Colors.white, fontSize: 14),
-            inputFormatters: maxLimit != null
-                ? [FilteringTextInputFormatter.digitsOnly]
-                : null,
+            inputFormatters: maxLimit != null ? [FilteringTextInputFormatter.digitsOnly] : null,
             onChanged: (value) {
               if (maxLimit != null && value.isNotEmpty) {
                 double val = parseDouble(value);
@@ -2762,15 +2980,9 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               prefixText: '₹ ',
               prefixStyle: const TextStyle(color: Colors.white70, fontSize: 14),
               hintText: hint,
-              hintStyle: TextStyle(
-                color: Colors.white.withOpacity(0.3),
-                fontSize: 12,
-              ),
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 12,
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               isDense: true,
             ),
           ),
@@ -2779,18 +2991,11 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     );
   }
 
-  Widget _buildDeductionInput(
-    String label,
-    TextEditingController controller, {
-    String? hint,
-  }) {
+  Widget _buildDeductionInput(String label, TextEditingController controller, {String? hint, double? maxLimit}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10),
-        ),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 10)),
         const SizedBox(height: 2),
         Container(
           decoration: BoxDecoration(
@@ -2802,23 +3007,22 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
             controller: controller,
             keyboardType: TextInputType.number,
             style: const TextStyle(color: Colors.white, fontSize: 12),
-            onChanged: (value) => setState(() {}),
+            onChanged: (value) {
+              if (maxLimit != null && value.isNotEmpty) {
+                double val = parseDouble(value);
+                if (val > maxLimit) {
+                  controller.text = maxLimit.toStringAsFixed(0);
+                }
+              }
+              setState(() {});
+            },
             decoration: InputDecoration(
               prefixText: '₹ ',
-              prefixStyle: TextStyle(
-                color: Colors.white.withOpacity(0.5),
-                fontSize: 11,
-              ),
+              prefixStyle: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
               hintText: hint,
-              hintStyle: TextStyle(
-                color: Colors.white.withOpacity(0.2),
-                fontSize: 9,
-              ),
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.2), fontSize: 9),
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 8,
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               isDense: true,
             ),
           ),
@@ -2836,10 +3040,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-        ),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
         const SizedBox(height: 4),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2853,11 +3054,7 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
               value: value,
               dropdownColor: const Color(0xFF1A1F2E),
               style: const TextStyle(color: Colors.white, fontSize: 13),
-              icon: const Icon(
-                Icons.keyboard_arrow_down,
-                color: Colors.white70,
-                size: 20,
-              ),
+              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 20),
               isExpanded: true,
               items: items,
               onChanged: onChanged,
@@ -2868,26 +3065,12 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
     );
   }
 
-  Widget _statCard({
-    required String label,
-    required String value,
-    required Color color,
-  }) {
+  Widget _statCard({required String label, required String value, required Color color}) {
     return Column(
       children: [
-        Text(
-          value,
-          style: TextStyle(
-            color: color,
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10),
-        ),
+        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10)),
       ],
     );
   }
@@ -2920,18 +3103,12 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
       height: _headerHeight,
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
-        border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.12)),
-        ),
+        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.12))),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios_new,
-              size: 18,
-              color: Colors.white,
-            ),
+            icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white),
             onPressed: () {
               if (widget.onBack != null) {
                 widget.onBack!();
@@ -2943,21 +3120,19 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
           const Expanded(
             child: Text(
               "Tax Calculator & Deductions",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.history, size: 18, color: Colors.white70),
-            onPressed: () =>
-                ToastService.showInfo(context, 'History feature coming soon!'),
+            onPressed: () => ToastService.showInfo(context, 'History feature coming soon!'),
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 18, color: Colors.white70),
-            onPressed: _loadSavedData,
+            onPressed: () {
+              _loadInvoiceData();
+              _loadSavedData();
+            },
           ),
         ],
       ),
@@ -2971,48 +3146,27 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         borderRadius: BorderRadius.circular(24),
         child: Stack(
           children: [
-            // 🔥 Outer Shadow (3D depth)
             Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.6),
-                    blurRadius: 25,
-                    offset: const Offset(0, 15),
-                  ),
-                ],
+                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.6), blurRadius: 25, offset: const Offset(0, 15))],
               ),
             ),
-
-            // 🔥 Glass Blur
             BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
-
-                  // Premium gradient glass effect
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.18),
-                      Colors.white.withOpacity(0.05),
-                    ],
+                    colors: [Colors.white.withOpacity(0.18), Colors.white.withOpacity(0.05)],
                   ),
-
-                  // Light border highlight
-                  border: Border.all(
-                    color: Colors.white.withOpacity(0.25),
-                    width: 1.2,
-                  ),
+                  border: Border.all(color: Colors.white.withOpacity(0.25), width: 1.2),
                 ),
-
                 child: Stack(
                   children: [
-                    // ✨ Inner Shine (top light reflection)
                     Positioned(
                       top: -40,
                       left: -40,
@@ -3021,17 +3175,10 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
                         height: 140,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              Colors.white.withOpacity(0.35),
-                              Colors.transparent,
-                            ],
-                          ),
+                          gradient: RadialGradient(colors: [Colors.white.withOpacity(0.35), Colors.transparent]),
                         ),
                       ),
                     ),
-
-                    // Actual Content
                     child,
                   ],
                 ),
@@ -3041,6 +3188,17 @@ class _TaxCalculatorScreenState extends State<TaxCalculatorScreen> {
         ),
       ),
     );
+  }
+
+  String _formatNumber(int number) {
+    if (number >= 10000000) {
+      return '${(number / 10000000).toStringAsFixed(1)}Cr';
+    } else if (number >= 100000) {
+      return '${(number / 100000).toStringAsFixed(1)}L';
+    } else if (number >= 1000) {
+      return '${(number / 1000).toStringAsFixed(1)}K';
+    }
+    return number.toString();
   }
 
   static Widget _liquidBlob({

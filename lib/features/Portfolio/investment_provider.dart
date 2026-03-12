@@ -198,15 +198,10 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   Future<void> loadFinancialGoals() async {
-    try {
-      final response = await _supabaseService.getFinancialGoals();
-      _financialGoals = response
-          .map((json) => FinancialGoal.fromJson(json))
-          .toList();
-    } catch (e) {
-      debugPrint('Error loading financial goals: $e');
-      _financialGoals = [];
-    }
+    final response = await _supabaseService.getFinancialGoals();
+    _financialGoals = response
+        .map((json) => FinancialGoal.fromJson(json))
+        .toList();
   }
 
   Future<void> addInvestment(Investment investment) async {
@@ -285,12 +280,22 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   Map<String, double> getCategoryDistribution({String owner = 'all'}) {
-    Map<String, double> distribution = {};
-    for (var inv in _investments) {
+    final Map<String, double> distribution = {};
+
+    for (final inv in investments) {
+
       if (owner != 'all' && inv.owner != owner) continue;
-      distribution[inv.category] =
-          (distribution[inv.category] ?? 0) + inv.currentValue;
+
+      final categoryName = inv.category;
+
+      if (!distribution.containsKey(categoryName)) {
+        distribution[categoryName] = 0;
+      }
+
+      distribution[categoryName] =
+          distribution[categoryName]! + inv.amount;
     }
+
     return distribution;
   }
 
@@ -346,8 +351,11 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   double getMaxCategoryValue({String owner = 'all'}) {
+
     final distribution = getCategoryDistribution(owner: owner);
+
     if (distribution.isEmpty) return 0;
+
     return distribution.values.reduce((a, b) => a > b ? a : b);
   }
 
@@ -383,4 +391,58 @@ class InvestmentProvider extends ChangeNotifier {
     if (category.contains('EPF')) return '🏢';
     return '💰';
   }
+
+  Future<void> addGoal(FinancialGoal goal) async {
+    await _supabaseService.addFinancialGoal(goal);
+    await loadInitialData();
+  }
+
+  double getGoalProgress(String goalId) {
+    return _investments
+        .where((inv) => inv.goalId == goalId)
+        .fold(0.0, (sum, inv) => sum + inv.amount);
+  }
+
+  double getGoalCurrentAmount(String goalId) {
+    return _investments
+        .where((inv) => inv.goalId == goalId)
+        .fold(0.0, (sum, inv) => sum + inv.amount);
+  }
+
+  void addCategory(Category category) {
+    _categories.add(category);
+    notifyListeners();
+  }
+
+  Map<String, double> calculateGoalInvestments() {
+    Map<String, double> totals = {};
+
+    for (var inv in _investments) {
+      if (inv.goalId == null) continue;
+
+      totals.update(
+        inv.goalId!,
+            (value) => value + inv.amount,
+        ifAbsent: () => inv.amount,
+      );
+    }
+
+    return totals;
+  }
+
+  Map<int, double> calculateCategoryTotals() {
+
+    Map<int, double> totals = {};
+
+    for (final inv in investments) {
+
+      if (inv.categoryId == null) continue;
+
+      totals[inv.categoryId!] =
+          (totals[inv.categoryId!] ?? 0) + inv.amount;
+    }
+
+    return totals;
+  }
+
 }

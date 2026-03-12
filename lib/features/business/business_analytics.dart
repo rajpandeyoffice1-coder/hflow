@@ -1,6 +1,5 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class BusinessAnalyticsScreen extends StatefulWidget {
@@ -9,32 +8,19 @@ class BusinessAnalyticsScreen extends StatefulWidget {
   const BusinessAnalyticsScreen({super.key, this.onBack});
 
   @override
-  State<BusinessAnalyticsScreen> createState() =>
-      _BusinessAnalyticsScreenState();
+  State<BusinessAnalyticsScreen> createState() => _BusinessAnalyticsScreenState();
 }
 
 class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   static const double _headerHeight = 64;
-  bool _isLoading = false;
+  bool _isLoading = true;
   bool _isRefreshing = false;
-  String _selectedPeriod = 'Today';
+  String _selectedPeriod = '30D';
   String _selectedClient = 'All Clients';
   String _selectedStatus = 'All Status';
 
   final List<String> _periods = ['Today', '7D', '30D', 'YTD', 'All'];
-  final List<String> _clients = [
-    'All Clients',
-    'Tata Motors Ltd',
-    'Metro Builders',
-    'Apex Pharmaceuticals',
-    'Infosys Limited',
-    'UrbanClap Technologies',
-    'Global Trading Co',
-    'Greenfield Constructions',
-    'TechMahindra Solutions',
-    'Zomato Media',
-    'Retail Solutions India',
-  ];
+  List<String> _clients = ['All Clients'];
   final List<String> _statuses = [
     'All Status',
     'Paid Only',
@@ -43,32 +29,118 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     'Draft Only',
   ];
 
-  // Original data from backend
-  List<dynamic> _originalInvoices = [];
-  List<dynamic> _originalClients = [];
-  
-  // Analytics data from backend
+  // Data from backend
+  List<Map<String, dynamic>> _originalInvoices = [];
+  List<Map<String, dynamic>> _originalClients = [];
+
+  // Analytics data
   double totalRevenue = 0;
   double topClientRevenue = 0;
   double averageInvoice = 0;
   String topClient = '';
   double topClientPercentage = 0;
 
-  List<Map<String, dynamic>> clientsList = [];
-  List<Map<String, String>> clientRows = [];
+  List<Map<String, String>> allClientRows = [];
+  List<Map<String, String>> filteredClientRows = [];
+  List<Map<String, String>> paginatedClientRows = [];
 
   // Status breakdown
-  double paidPercentage = 0;
-  double pendingPercentage = 0;
-  double overduePercentage = 0;
+  int paidCount = 0;
+  int pendingCount = 0;
+  int overdueCount = 0;
+  int draftCount = 0;
 
   // Client distribution data
   List<Map<String, dynamic>> clientDistribution = [];
+
+  // Monthly data for chart
+  Map<String, double> monthlyRevenue = {};
+  double maxMonthlyRevenue = 0;
+
+  // Pagination variables
+  int _currentPage = 0;
+  int _rowsPerPage = 5;
+  int _totalRows = 0;
+  List<int> _rowsPerPageOptions = [5, 10, 25, 50, 100];
+
+  // Search/filter variables
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _fetchAnalyticsData();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    setState(() {
+      _searchQuery = _searchController.text.toLowerCase();
+      _filterClientRows();
+      _currentPage = 0; // Reset to first page on search
+    });
+  }
+
+  void _filterClientRows() {
+    if (_searchQuery.isEmpty) {
+      filteredClientRows = List.from(allClientRows);
+    } else {
+      filteredClientRows = allClientRows.where((client) {
+        return client['name']!.toLowerCase().contains(_searchQuery) ||
+            client['email']!.toLowerCase().contains(_searchQuery) ||
+            client['status']!.toLowerCase().contains(_searchQuery);
+      }).toList();
+    }
+
+    _totalRows = filteredClientRows.length;
+    _updatePaginatedRows();
+  }
+
+  void _updatePaginatedRows() {
+    int start = _currentPage * _rowsPerPage;
+    int end = (start + _rowsPerPage) > filteredClientRows.length
+        ? filteredClientRows.length
+        : start + _rowsPerPage;
+
+    if (start < filteredClientRows.length) {
+      paginatedClientRows = filteredClientRows.sublist(start, end);
+    } else {
+      paginatedClientRows = [];
+    }
+  }
+
+  void _nextPage() {
+    if ((_currentPage + 1) * _rowsPerPage < filteredClientRows.length) {
+      setState(() {
+        _currentPage++;
+        _updatePaginatedRows();
+      });
+    }
+  }
+
+  void _previousPage() {
+    if (_currentPage > 0) {
+      setState(() {
+        _currentPage--;
+        _updatePaginatedRows();
+      });
+    }
+  }
+
+  void _onRowsPerPageChanged(int? value) {
+    setState(() {
+      _rowsPerPage = value!;
+      _currentPage = 0;
+      _updatePaginatedRows();
+    });
   }
 
   Future<void> _fetchAnalyticsData() async {
@@ -81,18 +153,55 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     try {
       final supabase = Supabase.instance.client;
 
-      // Fetch invoices data
-      _originalInvoices = await supabase.from('invoices').select('*');
+      // Fetch all invoices
+      final invoicesResponse = await supabase
+          .from('invoices')
+          .select('''
+            *,
+            clients (
+              id,
+              name,
+              email,
+              phone
+            )
+          ''')
+          .order('date_issued', ascending: false);
 
-      // Fetch clients data
-      _originalClients = await supabase.from('clients').select('*');
+      _originalInvoices = List<Map<String, dynamic>>.from(invoicesResponse);
 
-      // Process the data with current filters
-      _applyFilters();
+      // Fetch all clients for reference
+      final clientsResponse = await supabase
+          .from('clients')
+          .select('*')
+          .order('name');
+
+      _originalClients = List<Map<String, dynamic>>.from(clientsResponse);
+
+      // Extract unique client names for filter
+      Set<String> clientNames = {};
+      for (var invoice in _originalInvoices) {
+        if (invoice['client_name'] != null && invoice['client_name'].toString().isNotEmpty) {
+          clientNames.add(invoice['client_name'].toString());
+        }
+      }
+
+      setState(() {
+        _clients = ['All Clients', ...clientNames.toList()..sort()];
+      });
+
+      // Process the data
+      _processAnalyticsData(_originalInvoices);
+
     } catch (e) {
       debugPrint('Error fetching analytics data: $e');
-      // Fallback to sample data if error occurs
-      _loadSampleData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading data: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -105,8 +214,8 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
 
   void _applyFilters() {
     // Start with all invoices
-    List<dynamic> filteredInvoices = List.from(_originalInvoices);
-    
+    List<Map<String, dynamic>> filteredInvoices = List.from(_originalInvoices);
+
     // Apply status filter
     if (_selectedStatus != 'All Status') {
       String statusFilter = _selectedStatus.replaceAll(' Only', '').toUpperCase();
@@ -114,25 +223,25 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         return (invoice['status'] as String?)?.toUpperCase() == statusFilter;
       }).toList();
     }
-    
+
     // Apply client filter
     if (_selectedClient != 'All Clients') {
       filteredInvoices = filteredInvoices.where((invoice) {
         return (invoice['client_name'] as String?) == _selectedClient;
       }).toList();
     }
-    
+
     // Apply period filter
+    DateTime now = DateTime.now();
     if (_selectedPeriod != 'All') {
-      DateTime now = DateTime.now();
       filteredInvoices = filteredInvoices.where((invoice) {
         DateTime invoiceDate = DateTime.tryParse(invoice['date_issued'] ?? '') ?? DateTime(2000);
-        
+
         switch (_selectedPeriod) {
           case 'Today':
-            return invoiceDate.year == now.year && 
-                   invoiceDate.month == now.month && 
-                   invoiceDate.day == now.day;
+            return invoiceDate.year == now.year &&
+                invoiceDate.month == now.month &&
+                invoiceDate.day == now.day;
           case '7D':
             return invoiceDate.isAfter(now.subtract(const Duration(days: 7)));
           case '30D':
@@ -144,73 +253,86 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         }
       }).toList();
     }
-    
+
     // Process the filtered data
-    _processAnalyticsData(filteredInvoices, _originalClients);
+    _processAnalyticsData(filteredInvoices);
   }
 
-  void _processAnalyticsData(List<dynamic> invoices, List<dynamic> clients) {
-    // Calculate total revenue
-    totalRevenue = invoices.fold<double>(
-      0,
-      (sum, invoice) => sum + (invoice['amount'] as num).toDouble(),
-    );
-
-    // Calculate average invoice
-    averageInvoice = invoices.isNotEmpty ? totalRevenue / invoices.length : 0;
-
-    // Group invoices by client
+  void _processAnalyticsData(List<Map<String, dynamic>> invoices) {
+    // Reset data
+    totalRevenue = 0;
+    monthlyRevenue = {};
     Map<String, Map<String, dynamic>> clientStats = {};
+    maxMonthlyRevenue = 0;
 
+    // Process each invoice
     for (var invoice in invoices) {
-      String clientId = invoice['client_id'] ?? '';
+      double amount = (invoice['amount'] ?? 0).toDouble();
       String clientName = invoice['client_name'] ?? 'Unknown';
-      double amount = (invoice['amount'] as num).toDouble();
       String status = invoice['status'] ?? 'DRAFT';
       String dateIssued = invoice['date_issued'] ?? '';
 
-      if (!clientStats.containsKey(clientId)) {
-        clientStats[clientId] = {
+      // Add to total revenue
+      totalRevenue += amount;
+
+      // Update client stats
+      if (!clientStats.containsKey(clientName)) {
+        clientStats[clientName] = {
           'name': clientName,
-          'email': _getClientEmail(clients, clientId),
           'totalRevenue': 0.0,
           'invoices': 0,
-          'lastInvoice': '',
-          'lastInvoiceDate': DateTime(2000),
+          'lastInvoice': dateIssued,
           'status': status,
+          'email': _getClientEmail(clientName),
         };
       }
 
-      clientStats[clientId]!['totalRevenue'] += amount;
-      clientStats[clientId]!['invoices'] += 1;
+      clientStats[clientName]!['totalRevenue'] =
+          (clientStats[clientName]!['totalRevenue'] as double) + amount;
+      clientStats[clientName]!['invoices'] =
+          (clientStats[clientName]!['invoices'] as int) + 1;
 
-      // Track latest invoice
-      DateTime invoiceDate = DateTime.tryParse(dateIssued) ?? DateTime(2000);
-      if (invoiceDate.isAfter(clientStats[clientId]!['lastInvoiceDate'])) {
-        clientStats[clientId]!['lastInvoiceDate'] = invoiceDate;
-        clientStats[clientId]!['lastInvoice'] = _formatDate(invoiceDate);
-        clientStats[clientId]!['status'] = status;
+      // Track latest invoice date
+      if (dateIssued.isNotEmpty) {
+        DateTime currentLast = DateTime.tryParse(clientStats[clientName]!['lastInvoice'] ?? '') ?? DateTime(2000);
+        DateTime newDate = DateTime.tryParse(dateIssued) ?? DateTime(2000);
+        if (newDate.isAfter(currentLast)) {
+          clientStats[clientName]!['lastInvoice'] = dateIssued;
+          clientStats[clientName]!['status'] = status;
+        }
+      }
+
+      // Monthly revenue for chart
+      if (dateIssued.isNotEmpty) {
+        try {
+          DateTime date = DateTime.parse(dateIssued);
+          String monthKey = '${date.year}-${date.month.toString().padLeft(2, '0')}';
+          monthlyRevenue[monthKey] = (monthlyRevenue[monthKey] ?? 0) + amount;
+          if (monthlyRevenue[monthKey]! > maxMonthlyRevenue) {
+            maxMonthlyRevenue = monthlyRevenue[monthKey]!;
+          }
+        } catch (e) {
+          // Skip if date parsing fails
+        }
       }
     }
 
-    // Convert to list and sort by revenue
+    // Convert client stats to list and sort by revenue
     List<Map<String, dynamic>> sortedClients = clientStats.entries.map((entry) {
       return {
-        'id': entry.key,
         'name': entry.value['name'],
-        'email': entry.value['email'],
         'totalRevenue': entry.value['totalRevenue'],
-        'invoices': entry.value['invoices'].toString(),
+        'invoices': entry.value['invoices'],
         'lastInvoice': entry.value['lastInvoice'],
         'status': entry.value['status'],
+        'email': entry.value['email'],
       };
     }).toList();
 
-    sortedClients.sort(
-      (a, b) => b['totalRevenue'].compareTo(a['totalRevenue']),
-    );
+    sortedClients.sort((a, b) =>
+        (b['totalRevenue'] as double).compareTo(a['totalRevenue'] as double));
 
-    // Find top client
+    // Calculate top client
     if (sortedClients.isNotEmpty) {
       topClient = sortedClients.first['name'];
       topClientRevenue = sortedClients.first['totalRevenue'];
@@ -219,245 +341,137 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           : 0;
     }
 
-    // Prepare client rows for table
-    clientRows = sortedClients.map<Map<String, String>>((client) {
-      double avgAmount = client['invoices'] != '0'
-          ? client['totalRevenue'] / int.parse(client['invoices'])
+    // Calculate average invoice
+    averageInvoice = invoices.isNotEmpty ? totalRevenue / invoices.length : 0;
+
+    // Prepare all client rows for table
+    allClientRows = sortedClients.map<Map<String, String>>((client) {
+      double avgAmount = (client['invoices'] as int) > 0
+          ? (client['totalRevenue'] as double) / (client['invoices'] as int)
           : 0;
+
+      String lastInvoice = client['lastInvoice'] ?? '';
+      String formattedDate = 'N/A';
+      if (lastInvoice.isNotEmpty) {
+        try {
+          DateTime date = DateTime.parse(lastInvoice);
+          formattedDate = '${date.day} ${_getMonthAbbr(date.month)} ${date.year}';
+        } catch (e) {
+          formattedDate = 'N/A';
+        }
+      }
 
       return {
         'name': client['name'] as String,
         'email': client['email'] as String,
-        'revenue': _formatNumber((client['totalRevenue'] as num).toInt()),
-        'invoices': client['invoices'] as String,
-        'avgAmount': _formatNumber(avgAmount.toInt()),
-        'lastInvoice': client['lastInvoice'] as String? ?? 'N/A',
-        'status':
-            (client['status'] as String?)?.toString().toUpperCase() ?? 'DRAFT',
+        'revenue': _formatNumber((client['totalRevenue'] as double).round()),
+        'revenue_raw': (client['totalRevenue'] as double).toString(),
+        'invoices': (client['invoices'] as int).toString(),
+        'avgAmount': _formatNumber(avgAmount.round()),
+        'avgAmount_raw': avgAmount.toString(),
+        'lastInvoice': formattedDate,
+        'status': (client['status'] as String?)?.toUpperCase() ?? 'DRAFT',
       };
     }).toList();
 
-    // Prepare client distribution
-    clientDistribution = sortedClients.take(4).map((client) {
-      return {
-        'name': client['name'],
-        'percentage': totalRevenue > 0
-            ? (client['totalRevenue'] / totalRevenue * 100)
-            : 0,
-        'amount': '€${_formatNumber((client['totalRevenue'] as num).toInt())}',
-      };
-    }).toList();
+    // Apply search filter and update pagination
+    _filterClientRows();
 
-    // Calculate status breakdown
-    int totalInvoices = invoices.length;
-    if (totalInvoices > 0) {
-      int paidCount = invoices.where((i) => i['status'] == 'PAID').length;
-      int pendingCount = invoices.where((i) => i['status'] == 'PENDING').length;
-      int overdueCount = invoices.where((i) => i['status'] == 'OVERDUE').length;
-
-      paidPercentage = paidCount / totalInvoices;
-      pendingPercentage = pendingCount / totalInvoices;
-      overduePercentage = overdueCount / totalInvoices;
-    } else {
-      paidPercentage = 0;
-      pendingPercentage = 0;
-      overduePercentage = 0;
+    // Prepare client distribution (top 4 clients)
+    clientDistribution = [];
+    if (totalRevenue > 0) {
+      for (var i = 0; i < sortedClients.length && i < 4; i++) {
+        double percentage = (sortedClients[i]['totalRevenue'] as double) / totalRevenue * 100;
+        clientDistribution.add({
+          'name': sortedClients[i]['name'],
+          'percentage': percentage,
+          'amount': '₹${_formatNumber((sortedClients[i]['totalRevenue'] as double).round())}',
+        });
+      }
     }
+
+    // Calculate status counts
+    paidCount = invoices.where((i) => i['status'] == 'PAID').length;
+    pendingCount = invoices.where((i) => i['status'] == 'PENDING').length;
+    overdueCount = invoices.where((i) => i['status'] == 'OVERDUE').length;
+    draftCount = invoices.where((i) => i['status'] == 'DRAFT').length;
+
+    // Update UI
+    setState(() {});
   }
 
-  String _getClientEmail(List<dynamic> clients, String clientId) {
+  String _getClientEmail(String clientName) {
     try {
-      var client = clients.firstWhere(
-        (c) => c['id'].toString() == clientId,
-        orElse: () => null,
-      );
-      return client != null
-          ? client['email'] ?? 'email@example.com'
-          : 'email@example.com';
-    } catch (e) {
-      return 'email@example.com';
-    }
-  }
+      // First try to get from invoice's client relation
+      for (var invoice in _originalInvoices) {
+        if (invoice['client_name'] == clientName &&
+            invoice['clients'] != null &&
+            invoice['clients']['email'] != null) {
+          return invoice['clients']['email'];
+        }
+      }
 
-  String _formatDate(DateTime date) {
-    return '${date.day} ${_getMonthAbbr(date.month)} ${date.year}';
+      // Then try from clients table
+      for (var client in _originalClients) {
+        if (client['name'] == clientName && client['email'] != null) {
+          return client['email'];
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting client email: $e');
+    }
+    return 'email@example.com';
   }
 
   String _getMonthAbbr(int month) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return months[month - 1];
   }
 
   String _formatNumber(int number) {
-    return number.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
-      (Match m) => '${m[1]},',
-    );
+    if (number >= 10000000) {
+      return '${(number / 10000000).toStringAsFixed(1)}Cr';
+    } else if (number >= 100000) {
+      return '${(number / 100000).toStringAsFixed(1)}L';
+    } else if (number >= 1000) {
+      return '${(number / 1000).toStringAsFixed(1)}K';
+    }
+    return number.toString();
   }
 
-  void _loadSampleData() {
-    // Fallback sample data from your original code
-    totalRevenue = 2329000;
-    topClientRevenue = 450000;
-    averageInvoice = 116450;
-    topClient = 'Tata Motors Ltd';
-    topClientPercentage = 19.3;
-    paidPercentage = 0.65;
-    pendingPercentage = 0.25;
-    overduePercentage = 0.10;
-
-    clientRows = [
-      {
-        'name': 'Tata Motors Ltd',
-        'email': 'payables@tatamotors.com',
-        'revenue': '4,50,000',
-        'invoices': '1',
-        'avgAmount': '4,50,000',
-        'lastInvoice': '8 Feb 2025',
-        'status': 'PAID',
-      },
-      {
-        'name': 'Metro Builders',
-        'email': 'finance@metrobuilders.com',
-        'revenue': '3,45,000',
-        'invoices': '1',
-        'avgAmount': '3,45,000',
-        'lastInvoice': '28 Jan 2025',
-        'status': 'PENDING',
-      },
-      {
-        'name': 'Apex Pharmaceuticals',
-        'email': 'billing@apexpharma.com',
-        'revenue': '2,10,000',
-        'invoices': '1',
-        'avgAmount': '2,10,000',
-        'lastInvoice': '25 Jan 2025',
-        'status': 'PAID',
-      },
-      {
-        'name': 'Infosys Limited',
-        'email': 'vendor@infosys.com',
-        'revenue': '1,85,000',
-        'invoices': '1',
-        'avgAmount': '1,85,000',
-        'lastInvoice': '14 Feb 2025',
-        'status': 'PENDING',
-      },
-      {
-        'name': 'UrbanClap Technologies',
-        'email': 'accounts@urbanclap.com',
-        'revenue': '1,48,000',
-        'invoices': '1',
-        'avgAmount': '1,48,000',
-        'lastInvoice': '27 Feb 2025',
-        'status': 'PENDING',
-      },
-      {
-        'name': 'Global Trading Co',
-        'email': 'accounts@globaltrading.com',
-        'revenue': '1,25,000',
-        'invoices': '1',
-        'avgAmount': '1,25,000',
-        'lastInvoice': '18 Feb 2025',
-        'status': 'DRAFT',
-      },
-      {
-        'name': 'Greenfield Constructions',
-        'email': 'finance@greenfield.com',
-        'revenue': '1,25,000',
-        'invoices': '1',
-        'avgAmount': '1,25,000',
-        'lastInvoice': '15 Jan 2025',
-        'status': 'PENDING',
-      },
-      {
-        'name': 'TechMahindra Solutions',
-        'email': 'invoices@techmahindra.com',
-        'revenue': '95,000',
-        'invoices': '1',
-        'avgAmount': '95,000',
-        'lastInvoice': '25 Feb 2025',
-        'status': 'DRAFT',
-      },
-      {
-        'name': 'Zomato Media',
-        'email': 'finance@zomato.com',
-        'revenue': '92,000',
-        'invoices': '1',
-        'avgAmount': '92,000',
-        'lastInvoice': '19 Feb 2025',
-        'status': 'PAID',
-      },
-      {
-        'name': 'Retail Solutions India',
-        'email': 'finance@retailsolutions.in',
-        'revenue': '89,000',
-        'invoices': '1',
-        'avgAmount': '89,000',
-        'lastInvoice': '20 Jan 2025',
-        'status': 'OVERDUE',
-      },
-    ];
-
-    clientDistribution = [
-      {'name': 'Tata Motors Ltd', 'percentage': 19.3, 'amount': '€4,50,000'},
-      {
-        'name': 'Apex Pharmaceuticals',
-        'percentage': null,
-        'amount': '€2,10,000',
-      },
-      {'name': 'Infosys Limited', 'percentage': null, 'amount': '€9,52,000'},
-      {
-        'name': 'UrbanClap Technologies',
-        'percentage': null,
-        'amount': '€1,16,450',
-      },
-    ];
+  String _formatYAxisLabel(double value) {
+    if (value >= 10000000) {
+      return '₹${(value / 10000000).toStringAsFixed(1)}Cr';
+    } else if (value >= 100000) {
+      return '₹${(value / 100000).toStringAsFixed(1)}L';
+    } else if (value >= 1000) {
+      return '₹${(value / 1000).toStringAsFixed(1)}K';
+    }
+    return '₹${value.round()}';
   }
 
   Future<void> _refreshData() async {
-    setState(() {
-      _isRefreshing = true;
-    });
-
+    setState(() => _isRefreshing = true);
     await _fetchAnalyticsData();
   }
 
   void _onPeriodChanged(String period) {
-    setState(() {
-      _selectedPeriod = period;
-    });
+    setState(() => _selectedPeriod = period);
     if (_originalInvoices.isNotEmpty) {
       _applyFilters();
     }
   }
 
   void _onClientChanged(String? client) {
-    setState(() {
-      _selectedClient = client!;
-    });
+    setState(() => _selectedClient = client!);
     if (_originalInvoices.isNotEmpty) {
       _applyFilters();
     }
   }
 
   void _onStatusChanged(String? status) {
-    setState(() {
-      _selectedStatus = status!;
-    });
+    setState(() => _selectedStatus = status!);
     if (_originalInvoices.isNotEmpty) {
       _applyFilters();
     }
@@ -469,7 +483,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       backgroundColor: const Color(0xFF05060A),
       body: Stack(
         children: [
-          // Background gradients
+          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -480,12 +494,11 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             ),
           ),
 
-          // Background blobs with unique keys to avoid hero conflicts
+          // Background blobs
           Positioned(
             top: -120,
             left: -100,
             child: _liquidBlob(
-              key: const ValueKey('blob1'),
               width: 320,
               height: 420,
               color: const Color(0xFF9333EA),
@@ -496,7 +509,6 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             bottom: -160,
             right: -120,
             child: _liquidBlob(
-              key: const ValueKey('blob2'),
               width: 380,
               height: 460,
               color: const Color(0xFF3B82F6),
@@ -508,55 +520,50 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           SafeArea(
             child: _isLoading
                 ? const Center(
-                    child: CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        Color(0xFF5B8CFF),
-                      ),
-                    ),
-                  )
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF5B8CFF)),
+              ),
+            )
                 : Column(
+              children: [
+                _buildHeader(),
+                Expanded(
+                  child: Stack(
                     children: [
-                      _buildHeader(),
-                      Expanded(
-                        child: Stack(
+                      SingleChildScrollView(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SingleChildScrollView(
-                              padding: const EdgeInsets.all(20),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildTitle(),
-                                  const SizedBox(height: 24),
-                                  _buildFilters(),
-                                  const SizedBox(height: 24),
-                                  _buildEarningsChart(),
-                                  const SizedBox(height: 24),
-                                  _buildClientDistribution(),
-                                  const SizedBox(height: 24),
-                                  _buildKeyInsights(),
-                                  const SizedBox(height: 24),
-                                  _buildTopClientsTable(),
-                                ],
-                              ),
-                            ),
-                            if (_isRefreshing)
-                              Positioned(
-                                top: 0,
-                                left: 0,
-                                right: 0,
-                                child: LinearProgressIndicator(
-                                  backgroundColor: Colors.transparent,
-                                  valueColor:
-                                      const AlwaysStoppedAnimation<Color>(
-                                        Color(0xFF5B8CFF),
-                                      ),
-                                ),
-                              ),
+                            _buildTitle(),
+                            const SizedBox(height: 24),
+                            _buildFilters(),
+                            const SizedBox(height: 24),
+                            _buildEarningsChart(),
+                            const SizedBox(height: 24),
+                            _buildClientDistribution(),
+                            const SizedBox(height: 24),
+                            _buildKeyInsights(),
+                            const SizedBox(height: 24),
+                            _buildTopClientsTable(),
                           ],
                         ),
                       ),
+                      if (_isRefreshing)
+                        const Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: LinearProgressIndicator(
+                            backgroundColor: Colors.transparent,
+                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF5B8CFF)),
+                          ),
+                        ),
                     ],
                   ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -568,18 +575,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       height: _headerHeight,
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.05),
-        border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.12)),
-        ),
+        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.12))),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(
-              Icons.arrow_back_ios_new,
-              size: 18,
-              color: Colors.white,
-            ),
+            icon: const Icon(Icons.arrow_back_ios_new, size: 18, color: Colors.white),
             onPressed: () {
               if (widget.onBack != null) {
                 widget.onBack!();
@@ -591,27 +592,17 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           const Expanded(
             child: Text(
               "Business Analytics",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white),
             ),
           ),
-          // Refresh button
           IconButton(
-            icon: Icon(
-              Icons.refresh,
-              size: 20,
-              color: _isRefreshing ? Colors.grey : Colors.white70,
-            ),
+            icon: Icon(Icons.refresh, size: 20, color: _isRefreshing ? Colors.grey : Colors.white70),
             onPressed: _isRefreshing ? null : _refreshData,
           ),
           IconButton(
             icon: const Icon(Icons.logout, size: 20, color: Colors.white70),
             onPressed: () async {
               await Supabase.instance.client.auth.signOut();
-              // Navigate to login screen or handle logout
             },
           ),
         ],
@@ -625,11 +616,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       children: [
         Text(
           "Business Analytics",
-          style: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontSize: 28, fontWeight: FontWeight.w700, color: Colors.white),
         ),
         SizedBox(height: 4),
         Text(
@@ -703,10 +690,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           isExpanded: true,
           dropdownColor: const Color(0xFF1A1F2E),
           style: const TextStyle(color: Colors.white, fontSize: 14),
-          icon: Icon(
-            Icons.arrow_drop_down,
-            color: Colors.white.withOpacity(0.7),
-          ),
+          icon: Icon(Icons.arrow_drop_down, color: Colors.white.withOpacity(0.7)),
           items: items.map((item) {
             return DropdownMenuItem(
               value: item,
@@ -720,21 +704,38 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   }
 
   Widget _buildEarningsChart() {
+    // Get last 6 months for display, but show at least 2
+    List<String> months = monthlyRevenue.keys.toList()..sort();
+    if (months.length > 6) {
+      months = months.sublist(months.length - 6);
+    }
+
+    // Ensure we have at least 2 months for display
+    while (months.length < 2) {
+      months.add('No Data');
+    }
+
+    // Create Y-axis labels (5 steps)
+    List<double> yAxisValues = [];
+    if (maxMonthlyRevenue > 0) {
+      for (int i = 0; i <= 5; i++) {
+        yAxisValues.add((maxMonthlyRevenue * (5 - i) / 5).roundToDouble());
+      }
+    } else {
+      yAxisValues = [0, 0, 0, 0, 0, 0];
+    }
+
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             "Earnings Trend Analysis",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
           ),
           const SizedBox(height: 20),
 
-          // Chart bars with fixed height
+          // Chart
           SizedBox(
             height: 200,
             child: Row(
@@ -746,16 +747,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      _buildYAxisLabel('€7,00,000'),
-                      _buildYAxisLabel('€6,00,000'),
-                      _buildYAxisLabel('€5,00,000'),
-                      _buildYAxisLabel('€4,00,000'),
-                      _buildYAxisLabel('€3,00,000'),
-                      _buildYAxisLabel('€2,00,000'),
-                      _buildYAxisLabel('€1,00,000'),
-                      _buildYAxisLabel('€0'),
-                    ],
+                    children: yAxisValues.map((value) {
+                      return Text(
+                        _formatYAxisLabel(value),
+                        style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.5)),
+                      );
+                    }).toList(),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -764,10 +761,11 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                 Expanded(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildChartBar('2025-01', 0.6),
-                      _buildChartBar('2025-02', 0.9),
-                    ],
+                    children: months.map((month) {
+                      double revenue = monthlyRevenue[month] ?? 0;
+                      double percentage = maxMonthlyRevenue > 0 ? revenue / maxMonthlyRevenue : 0.1;
+                      return _buildChartBar(month, percentage);
+                    }).toList(),
                   ),
                 ),
               ],
@@ -778,28 +776,18 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     );
   }
 
-  Widget _buildYAxisLabel(String label) {
-    return Text(
-      label,
-      style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.5)),
-    );
-  }
-
   Widget _buildChartBar(String month, double percentage) {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Container(
           width: 40,
-          height: 140 * percentage,
+          height: 140 * percentage.clamp(0.1, 1.0),
           decoration: BoxDecoration(
-            gradient: LinearGradient(
+            gradient: const LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                const Color(0xFF5B8CFF),
-                const Color(0xFF9333EA).withOpacity(0.7),
-              ],
+              colors: [Color(0xFF5B8CFF), Color(0xFF9333EA)],
             ),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -824,35 +812,20 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             children: [
               const Text(
                 "Client Distribution",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
               ),
               const SizedBox(height: 16),
-              // Use dynamic data if available, otherwise fallback to sample
-              if (clientDistribution.isNotEmpty) ...[
-                for (int i = 0; i < clientDistribution.length; i++)
-                  _buildClientItem(
-                    clientDistribution[i]['name'],
-                    clientDistribution[i]['percentage'] != null
-                        ? '${(clientDistribution[i]['percentage'] as double).toStringAsFixed(1)}%'
-                        : null,
-                    clientDistribution[i]['amount'],
-                    isSubItem: i == 1, // Second item as sub-item
-                  ),
-              ] else ...[
-                _buildClientItem('Tata Motors Ltd', '19.3%', '€4,50,000'),
-                _buildClientItem(
-                  'Apex Pharmaceuticals',
-                  null,
-                  '€2,10,000',
-                  isSubItem: true,
-                ),
-                _buildClientItem('Infosys Limited', null, '€9,52,000'),
-                _buildClientItem('UrbanClap Technologies', null, '€1,16,450'),
-              ],
+              if (clientDistribution.isNotEmpty)
+                ...List.generate(clientDistribution.length, (index) {
+                  return _buildClientItem(
+                    clientDistribution[index]['name'],
+                    '${(clientDistribution[index]['percentage'] as double).toStringAsFixed(1)}%',
+                    clientDistribution[index]['amount'],
+                    isSubItem: index == 1,
+                  );
+                })
+              else
+                _buildClientItem('No Data', '0%', '₹0'),
             ],
           ),
         ),
@@ -866,24 +839,13 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             children: [
               const Text(
                 "Status Breakdown",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
               ),
               const SizedBox(height: 16),
-              _buildStatusItem('Paid', paidPercentage, const Color(0xFF22C55E)),
-              _buildStatusItem(
-                'Pending',
-                pendingPercentage,
-                const Color(0xFFF59E0B),
-              ),
-              _buildStatusItem(
-                'Overdue',
-                overduePercentage,
-                const Color(0xFFEF4444),
-              ),
+              _buildStatusItem('Paid', paidCount, const Color(0xFF22C55E)),
+              _buildStatusItem('Pending', pendingCount, const Color(0xFFF59E0B)),
+              _buildStatusItem('Overdue', overdueCount, const Color(0xFFEF4444)),
+              _buildStatusItem('Draft', draftCount, Colors.grey),
             ],
           ),
         ),
@@ -891,12 +853,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     );
   }
 
-  Widget _buildClientItem(
-    String name,
-    String? percentage,
-    String amount, {
-    bool isSubItem = false,
-  }) {
+  Widget _buildClientItem(String name, String percentage, String amount, {bool isSubItem = false}) {
     return Padding(
       padding: EdgeInsets.only(left: isSubItem ? 16 : 0, bottom: 12),
       child: Row(
@@ -905,10 +862,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             Container(
               width: 8,
               height: 8,
-              decoration: const BoxDecoration(
-                shape: BoxShape.circle,
-                color: Color(0xFF5B8CFF),
-              ),
+              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF5B8CFF)),
             ),
           if (isSubItem) const SizedBox(width: 16),
           const SizedBox(width: 8),
@@ -924,28 +878,26 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
                     color: Colors.white,
                   ),
                 ),
-                if (percentage != null)
-                  Text(
-                    percentage,
-                    style: const TextStyle(fontSize: 11, color: Colors.white70),
-                  ),
+                Text(
+                  percentage,
+                  style: const TextStyle(fontSize: 11, color: Colors.white70),
+                ),
               ],
             ),
           ),
           Text(
             amount,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.white),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatusItem(String label, double percentage, Color color) {
+  Widget _buildStatusItem(String label, int count, Color color) {
+    int total = paidCount + pendingCount + overdueCount + draftCount;
+    double percentage = total > 0 ? count / total : 0;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -953,16 +905,19 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                label,
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              Row(
+                children: [
+                  Text(label, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(width: 8),
+                  Text(
+                    '($count)',
+                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+                  ),
+                ],
               ),
               Text(
                 '${(percentage * 100).toInt()}%',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -987,23 +942,18 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       children: [
         const Text(
           "Key Insights & Recommendations",
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
         ),
         const SizedBox(height: 16),
 
-        // First row - 3 cards
+        // Insight cards
         Row(
           children: [
             Expanded(
               child: _buildInsightCard(
                 title: 'Total Revenue',
-                value: '€${_formatNumber(totalRevenue.toInt())}',
-                description:
-                    'Your business has generated €${_formatNumber(totalRevenue.toInt())} in total revenue.',
+                value: '₹${_formatNumber(totalRevenue.round())}',
+                description: 'Your business has generated ₹${_formatNumber(totalRevenue.round())} in total revenue.',
                 valueColor: const Color(0xFF22C55E),
               ),
             ),
@@ -1012,8 +962,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
               child: _buildInsightCard(
                 title: 'Top Client',
                 value: '${topClientPercentage.toStringAsFixed(1)}%',
-                description:
-                    '$topClient contributes ${topClientPercentage.toStringAsFixed(1)}% of your revenue (€${_formatNumber(topClientRevenue.toInt())}).',
+                description: '$topClient contributes ${topClientPercentage.toStringAsFixed(1)}% of your revenue (₹${_formatNumber(topClientRevenue.round())}).',
                 valueColor: const Color(0xFF5B8CFF),
               ),
             ),
@@ -1021,16 +970,15 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             Expanded(
               child: _buildInsightCard(
                 title: 'Average Invoice',
-                value: '€${_formatNumber(averageInvoice.toInt())}',
-                description:
-                    'Your average invoice value is €${_formatNumber(averageInvoice.toInt())}.',
+                value: '₹${_formatNumber(averageInvoice.round())}',
+                description: 'Your average invoice value is ₹${_formatNumber(averageInvoice.round())}.',
                 valueColor: const Color(0xFFF59E0B),
               ),
             ),
           ],
         ),
 
-        // Second row - full width card for recommendations
+        // Recommendations
         const SizedBox(height: 12),
         _glassCard(
           child: Column(
@@ -1038,22 +986,14 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             children: [
               const Text(
                 'Recommendations',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
               ),
               const SizedBox(height: 8),
               Text(
-                '• Consider following up with pending invoices from Metro Builders and Infosys Limited\n'
-                '• Review overdue payments from Retail Solutions India\n'
-                '• Your top client $topClient represents ${topClientPercentage.toStringAsFixed(1)}% of revenue - consider diversifying',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.white.withOpacity(0.8),
-                  height: 1.5,
-                ),
+                '• Consider following up with pending invoices ($pendingCount pending)\n'
+                    '• Review overdue payments ($overdueCount overdue)\n'
+                    '• Your top client $topClient represents ${topClientPercentage.toStringAsFixed(1)}% of revenue - consider diversifying',
+                style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.8), height: 1.5),
               ),
             ],
           ),
@@ -1072,18 +1012,11 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
+          Text(title, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const SizedBox(height: 8),
           Text(
             value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-              color: valueColor,
-            ),
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: valueColor),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1103,25 +1036,47 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       children: [
         const Text(
           "Top Performing Clients",
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
         ),
         const SizedBox(height: 16),
 
-        // Fixed width container for horizontal scrolling
+        // Search Bar
+        Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withOpacity(0.15)),
+          ),
+          child: TextField(
+            controller: _searchController,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Search clients...',
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+              prefixIcon: Icon(Icons.search, color: Colors.white.withOpacity(0.7)),
+              suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                icon: Icon(Icons.clear, color: Colors.white.withOpacity(0.7)),
+                onPressed: () {
+                  _searchController.clear();
+                },
+              )
+                  : null,
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+
+        // Table
         Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                Colors.white.withOpacity(0.15),
-                Colors.white.withOpacity(0.05),
-              ],
+              colors: [Colors.white.withOpacity(0.15), Colors.white.withOpacity(0.05)],
             ),
             border: Border.all(color: Colors.white.withOpacity(0.10)),
           ),
@@ -1129,149 +1084,228 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
             borderRadius: BorderRadius.circular(20),
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minWidth:
-                        MediaQuery.of(context).size.width -
-                        72, // Account for padding
-                  ),
-                  child: DataTable(
-                    headingRowColor: WidgetStateProperty.all(
-                      Colors.white.withOpacity(0.1),
-                    ),
-                    dataRowColor: WidgetStateProperty.resolveWith<Color?>((
-                      Set<WidgetState> states,
-                    ) {
-                      if (states.contains(WidgetState.selected)) {
-                        return Colors.white.withOpacity(0.15);
-                      }
-                      return Colors.transparent;
-                    }),
-                    headingTextStyle: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 12,
-                    ),
-                    dataTextStyle: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                    ),
-                    dividerThickness: 0,
-                    columnSpacing: 24,
-                    horizontalMargin: 16,
-                    columns: const [
-                      DataColumn(label: Text('CLIENT')),
-                      DataColumn(label: Text('TOTAL REVENUE')),
-                      DataColumn(label: Text('INVOICES')),
-                      DataColumn(label: Text('AVG AMOUNT')),
-                      DataColumn(label: Text('LAST INVOICE')),
-                      DataColumn(label: Text('STATUS')),
-                      DataColumn(label: Text('ACTIONS')),
-                    ],
-                    rows: clientRows.map((client) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            SizedBox(
-                              width: 180,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    client['name']!,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  Text(
-                                    client['email']!,
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.white.withOpacity(0.5),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 100,
-                              child: Text('€${client['revenue']}'),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 70,
-                              child: Text(client['invoices']!),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 90,
-                              child: Text('€${client['avgAmount']}'),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 90,
-                              child: Text(client['lastInvoice']!),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 80,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _getStatusColor(
-                                    client['status']!,
-                                  ).withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: _getStatusColor(
-                                      client['status']!,
-                                    ).withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Text(
-                                  client['status']!,
-                                  style: TextStyle(
-                                    color: _getStatusColor(client['status']!),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 50,
-                              child: IconButton(
-                                icon: Icon(
-                                  Icons.more_horiz,
-                                  color: Colors.white.withOpacity(0.7),
-                                  size: 18,
-                                ),
-                                onPressed: () {},
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
-                            ),
-                          ),
+              child: Column(
+                children: [
+                  // Table
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minWidth: MediaQuery.of(context).size.width - 72),
+                      child: DataTable(
+                        headingRowColor: WidgetStateProperty.all(Colors.white.withOpacity(0.1)),
+                        headingTextStyle: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                        dataTextStyle: const TextStyle(color: Colors.white, fontSize: 12),
+                        dividerThickness: 0,
+                        columnSpacing: 24,
+                        horizontalMargin: 16,
+                        columns: const [
+                          DataColumn(label: Text('CLIENT')),
+                          DataColumn(label: Text('TOTAL REVENUE')),
+                          DataColumn(label: Text('INVOICES')),
+                          DataColumn(label: Text('AVG AMOUNT')),
+                          DataColumn(label: Text('LAST INVOICE')),
+                          DataColumn(label: Text('STATUS')),
+                          DataColumn(label: Text('ACTIONS')),
                         ],
-                      );
-                    }).toList(),
+                        rows: paginatedClientRows.isEmpty
+                            ? [
+                          DataRow(cells: [
+                            DataCell(Text('No data available',
+                                style: TextStyle(color: Colors.white.withOpacity(0.5)))),
+                            DataCell(Text('')), DataCell(Text('')), DataCell(Text('')),
+                            DataCell(Text('')), DataCell(Text('')), DataCell(Text('')),
+                          ])
+                        ]
+                            : paginatedClientRows.map((client) {
+                          return DataRow(cells: [
+                            DataCell(
+                            SizedBox(
+                            width: 180,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  client['name']!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w500),
+                                ),
+                                Text(
+                                  client['email']!,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white.withOpacity(0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ),
+                            DataCell(
+                              SizedBox(
+                                width: 100,
+                                child: Text('₹${client['revenue']}'),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 70,
+                                child: Text(client['invoices']!),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 90,
+                                child: Text('₹${client['avgAmount']}'),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 90,
+                                child: Text(client['lastInvoice']!),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 80,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _getStatusColor(client['status']!).withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: _getStatusColor(client['status']!).withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    client['status']!,
+                                    style: TextStyle(
+                                      color: _getStatusColor(client['status']!),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 50,
+                                child: IconButton(
+                                  icon: Icon(
+                                    Icons.more_horiz,
+                                    color: Colors.white.withOpacity(0.7),
+                                    size: 18,
+                                  ),
+                                  onPressed: () {
+                                    _showClientDetails(client);
+                                  },
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ),
+                            ),
+                          ]);
+                        }).toList(),
+                      ),
+                    ),
                   ),
-                ),
+
+                  // Pagination Controls
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: Colors.white.withOpacity(0.1)),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Rows per page:\n${_currentPage * _rowsPerPage + 1}-${(_currentPage * _rowsPerPage + paginatedClientRows.length)} of $_totalRows',
+                                  style: TextStyle(
+                                    color: Colors.white.withOpacity(0.7),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<int>(
+                                      value: _rowsPerPage,
+                                      dropdownColor: const Color(0xFF1A1F2E),
+                                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                                      icon: Icon(
+                                        Icons.arrow_drop_down,
+                                        color: Colors.white.withOpacity(0.7),
+                                      ),
+                                      items: _rowsPerPageOptions.map((value) {
+                                        return DropdownMenuItem(
+                                          value: value,
+                                          child: Text(value.toString()),
+                                        );
+                                      }).toList(),
+                                      onChanged: _onRowsPerPageChanged,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.chevron_left,
+                                    color: _currentPage > 0
+                                        ? Colors.white
+                                        : Colors.white.withOpacity(0.3),
+                                    size: 20,
+                                  ),
+                                  onPressed: _currentPage > 0 ? _previousPage : null,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                                IconButton(
+                                  icon: Icon(
+                                    Icons.chevron_right,
+                                    color: (_currentPage + 1) * _rowsPerPage < filteredClientRows.length
+                                        ? Colors.white
+                                        : Colors.white.withOpacity(0.3),
+                                    size: 20,
+                                  ),
+                                  onPressed: (_currentPage + 1) * _rowsPerPage < filteredClientRows.length
+                                      ? _nextPage
+                                      : null,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -1280,18 +1314,74 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
     );
   }
 
+  void _showClientDetails(Map<String, String> client) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          title: Text(
+            client['name']!,
+            style: const TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildDetailRow('Email', client['email']!),
+              _buildDetailRow('Total Revenue', '₹${client['revenue']}'),
+              _buildDetailRow('Invoices', client['invoices']!),
+              _buildDetailRow('Average Amount', '₹${client['avgAmount']}'),
+              _buildDetailRow('Last Invoice', client['lastInvoice']!),
+              _buildDetailRow('Status', client['status']!),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close', style: TextStyle(color: Color(0xFF5B8CFF))),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+            ),
+          ),
+          Text(
+            ':',
+            style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'PAID':
-        return const Color(0xFF22C55E);
-      case 'PENDING':
-        return const Color(0xFFF59E0B);
-      case 'OVERDUE':
-        return const Color(0xFFEF4444);
-      case 'DRAFT':
-        return Colors.grey;
-      default:
-        return Colors.white;
+      case 'PAID': return const Color(0xFF22C55E);
+      case 'PENDING': return const Color(0xFFF59E0B);
+      case 'OVERDUE': return const Color(0xFFEF4444);
+      case 'DRAFT': return Colors.grey;
+      default: return Colors.white;
     }
   }
 
@@ -1305,9 +1395,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? const Color(0xFF5B8CFF).withOpacity(0.2)
-              : Colors.transparent,
+          color: isSelected ? const Color(0xFF5B8CFF).withOpacity(0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isSelected
@@ -1336,10 +1424,7 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Colors.white.withOpacity(0.15),
-            Colors.white.withOpacity(0.05),
-          ],
+          colors: [Colors.white.withOpacity(0.15), Colors.white.withOpacity(0.05)],
         ),
         border: Border.all(color: Colors.white.withOpacity(0.10)),
       ),
@@ -1354,14 +1439,12 @@ class _BusinessAnalyticsScreenState extends State<BusinessAnalyticsScreen> {
   }
 
   Widget _liquidBlob({
-    Key? key,
     required double width,
     required double height,
     required Color color,
     required double opacity,
   }) {
     return ImageFiltered(
-      key: key,
       imageFilter: ImageFilter.blur(sigmaX: 140, sigmaY: 140),
       child: Container(
         width: width,

@@ -49,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen>
   Map<String, double> monthlyTrend = {};
 
   bool isLoading = true;
+  bool _isInitialized = false;
   String userName = "Raj";
 
   String _selectedFilter = "All Time";
@@ -57,20 +58,14 @@ class _HomeScreenState extends State<HomeScreen>
   String _selectedTrend = "Monthly";
   final List<String> _trendOptions = ["Daily", "Monthly", "Yearly"];
 
-  final List<String> _months = [
-    "Mar 2025",
-    "Apr 2025",
-    "May 2025",
-    "Jun 2025",
-    "Jul 2025",
-    "Aug 2025",
-    "Sep 2025",
-    "Oct 2025",
-    "Nov 2025",
-    "Dec 2025",
-    "Jan 2026",
-    "Feb 2026",
-  ];
+  List<String> _months = [];
+  List<double> _incomeChartData = [];
+  List<double> _expenseChartData = [];
+
+  int _monthFilter = 6;
+
+  DateTime? _customStartMonth;
+  DateTime? _customEndMonth;
 
   final List<double> _incomeData = List.filled(12, 0);
   final List<double> _expenseData = List.filled(12, 0);
@@ -78,19 +73,102 @@ class _HomeScreenState extends State<HomeScreen>
   int _selectedSegmentIndex = 0;
   late TabController _segmentTabController;
 
+  // Cache for dashboard data
+  Map<String, dynamic> _dashboardCache = {};
+  DateTime? _lastCacheUpdate;
+
   @override
   void initState() {
     super.initState();
+
     _segmentTabController = TabController(length: 4, vsync: this);
+
     _segmentTabController.addListener(() {
-      if (_segmentTabController.indexIsChanging) {
+      if (!_segmentTabController.indexIsChanging) {
         setState(() {
           _selectedSegmentIndex = _segmentTabController.index;
         });
       }
     });
-    loadUserData();
-    loadDashboardData();
+
+    _generateLastMonths();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeData();
+    });
+  }
+
+  Future<void> _refreshDashboard() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    _lastCacheUpdate = null; // clear cache
+    await loadDashboardData();
+
+    if (mounted) {
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _initializeData() async {
+    try {
+      await loadUserData();
+      await loadDashboardData();
+    } catch (e) {
+      print("Init error: $e");
+    }
+
+    if (mounted) {
+      setState(() {
+        _isInitialized = true;
+        isLoading = false;
+      });
+    }
+  }
+
+  void _generateLastMonths() {
+    _months.clear();
+    _incomeChartData.clear();
+    _expenseChartData.clear();
+
+    DateTime now = DateTime.now();
+
+    for (int i = _monthFilter - 1; i >= 0; i--) {
+      DateTime month = DateTime(now.year, now.month - i, 1);
+      _months.add(DateFormat('MMM').format(month));
+
+      int index = month.month - 1;
+      _incomeChartData.add(_incomeData[index]);
+      _expenseChartData.add(_expenseData[index]);
+    }
+  }
+
+  void _generateCustomMonths() {
+    if (_customStartMonth == null || _customEndMonth == null) return;
+
+    _months.clear();
+    _incomeChartData.clear();
+    _expenseChartData.clear();
+
+    DateTime current = DateTime(_customStartMonth!.year, _customStartMonth!.month, 1);
+
+    while (!current.isAfter(_customEndMonth!)) {
+      int index = (current.month - 1) % 12;
+      _months.add(DateFormat('MMM').format(current));
+      _incomeChartData.add(_incomeData[index]);
+      _expenseChartData.add(_expenseData[index]);
+      current = DateTime(current.year, current.month + 1, 1);
+    }
+  }
+
+  void _resetMonthlyData() {
+    for (int i = 0; i < 12; i++) {
+      _incomeData[i] = 0;
+      _expenseData[i] = 0;
+    }
   }
 
   @override
@@ -104,15 +182,14 @@ class _HomeScreenState extends State<HomeScreen>
       final userId = supabase.auth.currentUser?.id ?? 'default_user';
       final settings = await supabase
           .from('settings')
-          .select()
+          .select('profile_name, profile_email')
           .eq('user_id', userId)
           .maybeSingle();
 
-      if (settings != null) {
+      if (settings != null && mounted) {
         setState(() {
           userSettings = settings;
-          userName =
-              settings['profile_name'] ??
+          userName = settings['profile_name'] ??
               settings['profile_email'] ??
               "Raj.p@urbanites.in";
         });
@@ -123,92 +200,102 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> loadDashboardData() async {
-    setState(() => isLoading = true);
+    // Check cache (5 minutes cache duration)
+    if (_lastCacheUpdate != null &&
+        DateTime.now().difference(_lastCacheUpdate!).inMinutes < 5) {
+      return;
+    }
+
     try {
       final userId = supabase.auth.currentUser?.id ?? 'default_user';
-
-      final summary = await supabase
-          .from('balance_summary')
-          .select()
-          .order('last_calculated_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-
-      if (summary != null) {
-        setState(() {
-          balanceSummary = summary;
-        });
-      }
-
-      final invoices = await supabase
-          .from('invoices')
-          .select('id, client_name, amount, date_issued, status, client_id')
-          .order('date_issued', ascending: false)
-          .limit(5);
-
-      final expensesData = await supabase
-          .from('expenses')
-          .select(
-            'id, amount, description, date_incurred, category_name, vendor_name',
-          )
-          .order('date_incurred', ascending: false)
-          .limit(10);
-
-      final clients = await supabase
-          .from('clients')
-          .select('id, name, total_invoices, total_amount')
-          .order('total_amount', ascending: false)
-          .limit(5);
-
-      final investments = await supabase
-          .from('investments')
-          .select('id, amount, date, category_id, sub_category_id')
-          .eq('user_id', userId)
-          .order('date', ascending: false)
-          .limit(5);
-
       final now = DateTime.now();
-      final firstDayOfMonth = DateTime(now.year, now.month, 1);
+      final sixMonthsAgo = DateTime(now.year, now.month - 5, 1);
 
-      final monthlyIncome = await supabase
-          .from('invoices')
-          .select('amount')
-          .gte('date_issued', firstDayOfMonth.toIso8601String())
-          .eq('status', 'Paid');
+      // Execute multiple queries in parallel for better performance
+      final results = await Future.wait([
+        supabase
+            .from('balance_summary')
+            .select()
+            .order('last_calculated_at', ascending: false)
+            .limit(1)
+            .maybeSingle(),
 
-      final monthlyExpenses = await supabase
-          .from('expenses')
-          .select('amount')
-          .gte('date_incurred', firstDayOfMonth.toIso8601String());
+        supabase
+            .from('invoices')
+            .select('id, client_name, amount, date_issued, status')
+            .order('date_issued', ascending: false)
+            .limit(5),
 
-      double incomeSum = 0;
-      for (var inv in monthlyIncome) {
-        incomeSum += (inv['amount'] as num).toDouble();
+        supabase
+            .from('expenses')
+            .select('id, amount, description, date_incurred, category_name, vendor_name')
+            .order('date_incurred', ascending: false)
+            .limit(10),
+
+        supabase
+            .from('clients')
+            .select('name, total_amount')
+            .order('total_amount', ascending: false)
+            .limit(5),
+
+        // Get monthly aggregated data for last 6 months only
+        supabase
+            .from('invoices')
+            .select('amount, date_issued')
+            .eq('status', 'Paid')
+            .gte('date_issued', sixMonthsAgo.toIso8601String()),
+
+        supabase
+            .from('expenses')
+            .select('amount, date_incurred')
+            .gte('date_incurred', sixMonthsAgo.toIso8601String()),
+      ]);
+
+      final summary = results[0] as Map<String, dynamic>? ?? {};
+      final invoices = results[1] as List;
+      final expensesData = results[2] as List;
+      final clients = results[3] as List;
+      final recentInvoicesData = results[4] as List;
+      final recentExpensesData = results[5] as List;
+
+      if (summary.isNotEmpty && mounted) {
+        balanceSummary = summary;
       }
 
-      double expenseSum = 0;
-      for (var exp in monthlyExpenses) {
-        expenseSum += (exp['amount'] as num).toDouble();
-      }
+      // Process monthly data efficiently
+      _resetMonthlyData();
 
-      for (int i = 0; i < 6; i++) {
-        if (i < invoices.length) {
-          _incomeData[5 - i] = (invoices[i]['amount'] as num).toDouble();
+      // Process invoices for monthly data
+      for (var inv in recentInvoicesData) {
+        try {
+          DateTime date = DateTime.parse(inv['date_issued']);
+          int monthIndex = date.month - 1;
+          _incomeData[monthIndex] += (inv['amount'] as num).toDouble();
+        } catch (e) {
+          continue;
         }
       }
 
-      for (int i = 0; i < 3 && i < expensesData.length; i++) {
-        _expenseData[5 - i] = (expensesData[i]['amount'] as num).toDouble();
+      // Process expenses for monthly data
+      for (var exp in recentExpensesData) {
+        try {
+          DateTime date = DateTime.parse(exp['date_incurred']);
+          int monthIndex = date.month - 1;
+          _expenseData[monthIndex] += (exp['amount'] as num).toDouble();
+        } catch (e) {
+          continue;
+        }
       }
 
+      // Build transactions list efficiently
       final List<Map<String, dynamic>> transactions = [];
 
       for (var inv in invoices) {
         transactions.add({
           'id': inv['id'],
-          'title': inv['client_name'],
+          'title': inv['client_name'] ?? 'Client',
           'subtitle': 'Invoice #${inv['id']}',
-          'amount': '₹${NumberFormat('#,##0').format(inv['amount'])}',
+          'amount': '₹${NumberFormat('#,##0').format(inv['amount'] ?? 0)}',
           'isExpense': false,
           'date': DateTime.parse(inv['date_issued']),
         });
@@ -217,9 +304,9 @@ class _HomeScreenState extends State<HomeScreen>
       for (var exp in expensesData) {
         transactions.add({
           'id': exp['id'],
-          'title': exp['vendor_name'] ?? exp['description'],
+          'title': exp['vendor_name'] ?? exp['description'] ?? 'Expense',
           'subtitle': exp['category_name'] ?? 'Expense',
-          'amount': '-₹${NumberFormat('#,##0').format(exp['amount'])}',
+          'amount': '-₹${NumberFormat('#,##0').format(exp['amount'] ?? 0)}',
           'isExpense': true,
           'date': DateTime.parse(exp['date_incurred']),
         });
@@ -227,19 +314,22 @@ class _HomeScreenState extends State<HomeScreen>
 
       transactions.sort((a, b) => b['date'].compareTo(a['date']));
 
-      setState(() {
-        recentInvoices = invoices;
-        expenses = expensesData;
-        recentTransactions = transactions.take(4).toList();
-        clientRevenue = {
-          for (var client in clients)
-            client['name']: (client['total_amount'] as num).toDouble(),
-        };
-        isLoading = false;
-      });
+      // Update client revenue
+      final Map<String, double> revenue = {};
+      for (var client in clients) {
+        revenue[client['name'] ?? 'Client'] = (client['total_amount'] as num?)?.toDouble() ?? 0;
+      }
+
+      recentInvoices = invoices.take(5).toList();
+      expenses = expensesData;
+      recentTransactions = transactions.take(4).toList();
+      clientRevenue = revenue;
+      _lastCacheUpdate = DateTime.now();
+      _generateLastMonths();
+      _applyOverviewFilter();
+
     } catch (e) {
       print('Error loading dashboard data: $e');
-      setState(() => isLoading = false);
     }
   }
 
@@ -324,7 +414,7 @@ class _HomeScreenState extends State<HomeScreen>
                           radius: 18,
                           backgroundColor: const Color(0xFF5B8CFF),
                           child: Text(
-                            userName.split('@')[0][0].toUpperCase(),
+                            userName.isNotEmpty ? userName[0].toUpperCase() : 'R',
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -370,53 +460,68 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _homeContent() {
-    if (isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFF6366F1)),
+    if (isLoading || !_isInitialized) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(color: Color(0xFF6366F1)),
+            const SizedBox(height: 16),
+            Text(
+              "Loading your dashboard...",
+              style: TextStyle(color: Colors.white.withOpacity(0.7)),
+            ),
+          ],
+        ),
       );
     }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: 10),
-          Text(
-            "Good afternoon, ${userName.split('@')[0]}",
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+    return RefreshIndicator(
+      color: const Color(0xFF6366F1),
+      backgroundColor: const Color(0xFF1A1C2A),
+      onRefresh: _refreshDashboard,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 10),
+            Text(
+              "Good afternoon, ${userName.split('@')[0]}",
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            "Here’s your financial overview",
-            style: TextStyle(color: Colors.white54),
-          ),
-          const SizedBox(height: 20),
-          _overviewSection(),
-          const SizedBox(height: 22),
-          const Text(
-            "Quick Actions",
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
+            const SizedBox(height: 4),
+            const Text(
+              "Here’s your financial overview",
+              style: TextStyle(color: Colors.white54),
             ),
-          ),
-          const SizedBox(height: 12),
-          _quickActionsGrid(),
-          const SizedBox(height: 22),
-          _segmentTabs(),
-          const SizedBox(height: 22),
-          _buildSegmentContent(),
-        ],
+            const SizedBox(height: 20),
+            _overviewSection(),
+            const SizedBox(height: 22),
+            const Text(
+              "Quick Actions",
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _quickActionsGrid(),
+            const SizedBox(height: 22),
+            _segmentTabs(),
+            const SizedBox(height: 22),
+            _buildSegmentContent(),
+          ],
+        ),
       ),
     );
   }
-
   Widget _buildSegmentContent() {
     switch (_selectedSegmentIndex) {
       case 0:
@@ -496,19 +601,17 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             )
           else
-            ...recentTransactions
-                .map(
+            ...recentTransactions.map(
                   (tx) => Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _transactionTile(
-                      tx['title'],
-                      tx['subtitle'],
-                      tx['amount'],
-                      isExpense: tx['isExpense'],
-                    ),
-                  ),
-                )
-                ,
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _transactionTile(
+                  tx['title'],
+                  tx['subtitle'],
+                  tx['amount'],
+                  isExpense: tx['isExpense'],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -529,9 +632,7 @@ class _HomeScreenState extends State<HomeScreen>
           icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
           style: const TextStyle(color: Colors.white),
           onChanged: (value) {
-            setState(() {
-              _selectedFilter = value!;
-            });
+            setState(() => _selectedFilter = value!);
             _filterTransactions(value!);
           },
           items: const [
@@ -546,7 +647,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _filterTransactions(String filter) async {
-    setState(() => isLoading = true);
     try {
       DateTime now = DateTime.now();
       DateTime startDate;
@@ -565,28 +665,32 @@ class _HomeScreenState extends State<HomeScreen>
           startDate = DateTime(2000, 1, 1);
       }
 
-      final invoices = await supabase
-          .from('invoices')
-          .select('id, client_name, amount, date_issued, status')
-          .gte('date_issued', startDate.toIso8601String())
-          .order('date_issued', ascending: false)
-          .limit(5);
+      final results = await Future.wait([
+        supabase
+            .from('invoices')
+            .select('id, client_name, amount, date_issued, status')
+            .gte('date_issued', startDate.toIso8601String())
+            .order('date_issued', ascending: false)
+            .limit(5),
+        supabase
+            .from('expenses')
+            .select('id, amount, description, date_incurred, category_name')
+            .gte('date_incurred', startDate.toIso8601String())
+            .order('date_incurred', ascending: false)
+            .limit(5),
+      ]);
 
-      final expensesData = await supabase
-          .from('expenses')
-          .select('id, amount, description, date_incurred, category_name')
-          .gte('date_incurred', startDate.toIso8601String())
-          .order('date_incurred', ascending: false)
-          .limit(5);
+      final invoices = results[0] as List;
+      final expensesData = results[1] as List;
 
       final List<Map<String, dynamic>> filtered = [];
 
       for (var inv in invoices) {
         filtered.add({
           'id': inv['id'],
-          'title': inv['client_name'],
+          'title': inv['client_name'] ?? 'Client',
           'subtitle': 'Invoice #${inv['id']}',
-          'amount': '₹${NumberFormat('#,##0').format(inv['amount'])}',
+          'amount': '₹${NumberFormat('#,##0').format(inv['amount'] ?? 0)}',
           'isExpense': false,
           'date': DateTime.parse(inv['date_issued']),
         });
@@ -595,9 +699,9 @@ class _HomeScreenState extends State<HomeScreen>
       for (var exp in expensesData) {
         filtered.add({
           'id': exp['id'],
-          'title': exp['description'],
+          'title': exp['description'] ?? 'Expense',
           'subtitle': exp['category_name'] ?? 'Expense',
-          'amount': '-₹${NumberFormat('#,##0').format(exp['amount'])}',
+          'amount': '-₹${NumberFormat('#,##0').format(exp['amount'] ?? 0)}',
           'isExpense': true,
           'date': DateTime.parse(exp['date_incurred']),
         });
@@ -605,22 +709,20 @@ class _HomeScreenState extends State<HomeScreen>
 
       filtered.sort((a, b) => b['date'].compareTo(a['date']));
 
-      setState(() {
-        recentTransactions = filtered.take(4).toList();
-        isLoading = false;
-      });
+      if (mounted) {
+        setState(() => recentTransactions = filtered.take(4).toList());
+      }
     } catch (e) {
       print('Error filtering transactions: $e');
-      setState(() => isLoading = false);
     }
   }
 
   Widget _transactionTile(
-    String title,
-    String subtitle,
-    String amount, {
-    bool isExpense = false,
-  }) {
+      String title,
+      String subtitle,
+      String amount, {
+        bool isExpense = false,
+      }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -696,10 +798,7 @@ class _HomeScreenState extends State<HomeScreen>
                   child: DropdownButton<String>(
                     value: _selectedFilterAnalytic,
                     dropdownColor: const Color(0xff1C1C1E),
-                    icon: const Icon(
-                      Icons.keyboard_arrow_down,
-                      color: Colors.white70,
-                    ),
+                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
                     style: const TextStyle(color: Colors.white, fontSize: 12),
                     items: _filters.map((String value) {
                       return DropdownMenuItem<String>(
@@ -708,9 +807,9 @@ class _HomeScreenState extends State<HomeScreen>
                       );
                     }).toList(),
                     onChanged: (value) {
-                      setState(() {
-                        _selectedFilterAnalytic = value!;
-                      });
+                      if (value != null) {
+                        setState(() => _selectedFilterAnalytic = value);
+                      }
                     },
                   ),
                 ),
@@ -795,7 +894,7 @@ class _HomeScreenState extends State<HomeScreen>
   double _getTotalIncome() {
     double total = 0;
     for (var inv in recentInvoices) {
-      total += (inv['amount'] as num).toDouble();
+      total += (inv['amount'] as num?)?.toDouble() ?? 0;
     }
     return total;
   }
@@ -805,46 +904,19 @@ class _HomeScreenState extends State<HomeScreen>
     for (var spot in _getChartData()) {
       if (spot.y > max) max = spot.y;
     }
-    return max + 1000;
+    return max > 0 ? max + 1000 : 10000;
   }
 
   List<FlSpot> _getChartData() {
     switch (_selectedFilterAnalytic) {
       case "Week":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 1000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 2000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 1500),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 2500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 1800),
-          FlSpot(5, _incomeData.length > 5 ? _incomeData[5] : 3000),
-          FlSpot(6, _incomeData.length > 6 ? _incomeData[6] : 2800),
-        ];
+        return List.generate(7, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
       case "Month":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 2000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 3000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 4000),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 3500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 5000),
-        ];
+        return List.generate(5, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
       case "Year":
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 4000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 6000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 7500),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 7000),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 8500),
-        ];
+        return List.generate(5, (i) => FlSpot(i.toDouble(), _incomeData[i % 12] * 1.5));
       default:
-        return [
-          FlSpot(0, _incomeData.isNotEmpty ? _incomeData[0] : 1000),
-          FlSpot(1, _incomeData.length > 1 ? _incomeData[1] : 2000),
-          FlSpot(2, _incomeData.length > 2 ? _incomeData[2] : 3000),
-          FlSpot(3, _incomeData.length > 3 ? _incomeData[3] : 2500),
-          FlSpot(4, _incomeData.length > 4 ? _incomeData[4] : 5000),
-          FlSpot(5, _incomeData.length > 5 ? _incomeData[5] : 7500),
-        ];
+        return List.generate(6, (i) => FlSpot(i.toDouble(), _incomeData[i % 12]));
     }
   }
 
@@ -874,10 +946,7 @@ class _HomeScreenState extends State<HomeScreen>
                   child: DropdownButton<String>(
                     value: _selectedTrend,
                     dropdownColor: const Color(0xff1C1C1E),
-                    icon: const Icon(
-                      Icons.keyboard_arrow_down,
-                      color: Colors.white70,
-                    ),
+                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
                     style: const TextStyle(color: Colors.white),
                     items: _trendOptions.map((String value) {
                       return DropdownMenuItem<String>(
@@ -886,9 +955,9 @@ class _HomeScreenState extends State<HomeScreen>
                       );
                     }).toList(),
                     onChanged: (value) {
-                      setState(() {
-                        _selectedTrend = value!;
-                      });
+                      if (value != null) {
+                        setState(() => _selectedTrend = value);
+                      }
                     },
                   ),
                 ),
@@ -935,18 +1004,26 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(
                       showTitles: true,
                       getTitlesWidget: (value, meta) {
-                        const months = [
-                          "Jan",
-                          "Feb",
-                          "Mar",
-                          "Apr",
-                          "May",
-                          "Jun",
-                        ];
+                        getTitlesWidget: (value, meta) {
+                          int index = value.toInt();
+                          if (index >= 0 && index < _months.length) {
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                _months[index],
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox();
+                        };
                         int index = value.toInt();
-                        if (index < months.length) {
+                        if (index < _months.length) {
                           return Text(
-                            months[index],
+                            _months[index],
                             style: const TextStyle(
                               color: Colors.white54,
                               fontSize: 11,
@@ -964,14 +1041,9 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-                barGroups: [
-                  _barData(0, _incomeData.isNotEmpty ? _incomeData[0] : 5000),
-                  _barData(1, _incomeData.length > 1 ? _incomeData[1] : 7000),
-                  _barData(2, _incomeData.length > 2 ? _incomeData[2] : 6000),
-                  _barData(3, _incomeData.length > 3 ? _incomeData[3] : 8500),
-                  _barData(4, _incomeData.length > 4 ? _incomeData[4] : 7500),
-                  _barData(5, _incomeData.length > 5 ? _incomeData[5] : 9200),
-                ],
+                barGroups: List.generate(_months.length, (index) {
+                  return _barData(index, _incomeChartData[index]);
+                }),
               ),
             ),
           ),
@@ -982,10 +1054,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   double _getMaxBarValue() {
     double max = 0;
-    for (int i = 0; i < 6; i++) {
-      if (i < _incomeData.length && _incomeData[i] > max) {
-        max = _incomeData[i];
-      }
+    for (int i = 0; i < _months.length; i++) {
+      if (_incomeData[i % 12] > max) max = _incomeData[i % 12];
     }
     return max > 0 ? max + 1000 : 10000;
   }
@@ -1043,9 +1113,7 @@ class _HomeScreenState extends State<HomeScreen>
             spacing: 20,
             runSpacing: 8,
             children: data.map((item) {
-              double percentage = total == 0
-                  ? 0
-                  : (item['value'] / total) * 100;
+              double percentage = total == 0 ? 0 : (item['value'] / total) * 100;
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1073,16 +1141,16 @@ class _HomeScreenState extends State<HomeScreen>
 
   List<Map<String, dynamic>> _getClientRevenueData() {
     List<Map<String, dynamic>> result = [];
-    List<Color> colors = [
-      const Color(0xff6C63FF),
-      const Color(0xff2DD4BF),
-      const Color(0xffF59E0B),
-      const Color(0xffEF4444),
+    List<Color> colors = const [
+      Color(0xff6C63FF),
+      Color(0xff2DD4BF),
+      Color(0xffF59E0B),
+      Color(0xffEF4444),
     ];
 
     int index = 0;
     clientRevenue.forEach((name, value) {
-      if (index < colors.length) {
+      if (index < colors.length && value > 0) {
         result.add({"name": name, "value": value, "color": colors[index]});
       }
       index++;
@@ -1090,16 +1158,8 @@ class _HomeScreenState extends State<HomeScreen>
 
     if (result.isEmpty) {
       result = [
-        {
-          "name": "Sample Client",
-          "value": 7500.0,
-          "color": const Color(0xff6C63FF),
-        },
-        {
-          "name": "Another Client",
-          "value": 2500.0,
-          "color": const Color(0xff2DD4BF),
-        },
+        {"name": "Sample Client", "value": 7500.0, "color": const Color(0xff6C63FF)},
+        {"name": "Another Client", "value": 2500.0, "color": const Color(0xff2DD4BF)},
       ];
     }
 
@@ -1112,17 +1172,54 @@ class _HomeScreenState extends State<HomeScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            children: const [
-              Icon(Icons.bar_chart_rounded, color: Colors.white70, size: 20),
-              SizedBox(width: 8),
-              Text(
-                "Income vs Expenses Report",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.bar_chart_rounded, color: Colors.white70, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    "Income vs \nExpenses",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: _monthFilter,
+                    dropdownColor: const Color(0xff1C1C1E),
+                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    items: const [
+                      DropdownMenuItem(value: 2, child: Text("2 Months")),
+                      DropdownMenuItem(value: 3, child: Text("3 Months")),
+                      DropdownMenuItem(value: 4, child: Text("4 Months")),
+                      DropdownMenuItem(value: 6, child: Text("6 Months")),
+                      DropdownMenuItem(value: 99, child: Text("Custom Range")),
+                    ],
+                    onChanged: (v) async {
+                      if (v == 99) {
+                        await _selectCustomMonthRange();
+                      } else if (v != null) {
+                        setState(() {
+                          _monthFilter = v;
+                          _generateLastMonths();
+                        });
+                      }
+                    },
+                  ),
+                ),
+              )
             ],
           ),
           const SizedBox(height: 24),
@@ -1175,19 +1272,21 @@ class _HomeScreenState extends State<HomeScreen>
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         int index = value.toInt();
-                        if (index < _months.length) {
+
+                        if (index >= 0 && index < _months.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
                               _months[index],
                               style: const TextStyle(
-                                fontSize: 9,
-                                color: Colors.white54,
+                                color: Colors.white70,
+                                fontSize: 11,
                               ),
                             ),
                           );
                         }
-                        return const Text('');
+
+                        return const SizedBox();
                       },
                     ),
                   ),
@@ -1198,33 +1297,31 @@ class _HomeScreenState extends State<HomeScreen>
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-                barGroups: List.generate(12, (index) {
+                barGroups: List.generate(_months.length, (index) {
                   return BarChartGroupData(
                     x: index,
                     barsSpace: 6,
                     barRods: [
-                      if (_incomeData[index] > 0)
-                        BarChartRodData(
-                          toY: _incomeData[index],
-                          width: 14,
-                          borderRadius: BorderRadius.circular(8),
-                          gradient: const LinearGradient(
-                            colors: [Colors.greenAccent, Colors.green],
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                          ),
+                      BarChartRodData(
+                        toY: _incomeChartData[index],
+                        width: 10,
+                        borderRadius: BorderRadius.circular(6),
+                        gradient: const LinearGradient(
+                          colors: [Colors.greenAccent, Colors.green],
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
                         ),
-                      if (_expenseData[index] > 0)
-                        BarChartRodData(
-                          toY: _expenseData[index],
-                          width: 14,
-                          borderRadius: BorderRadius.circular(8),
-                          gradient: const LinearGradient(
-                            colors: [Colors.redAccent, Colors.red],
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                          ),
+                      ),
+                      BarChartRodData(
+                        toY: _expenseChartData[index],
+                        width: 10,
+                        borderRadius: BorderRadius.circular(6),
+                        gradient: const LinearGradient(
+                          colors: [Colors.redAccent, Colors.red],
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
                         ),
+                      ),
                     ],
                   );
                 }),
@@ -1236,66 +1333,268 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  double _getMaxIncomeExpenseValue() {
-    double max = 0;
-    for (int i = 0; i < 12; i++) {
-      if (_incomeData[i] > max) max = _incomeData[i];
-      if (_expenseData[i] > max) max = _expenseData[i];
+  Future<void> _selectCustomMonthRange() async {
+    DateTime now = DateTime.now();
+    DateTime? start = await showDatePicker(
+      context: context,
+      initialDate: DateTime(now.year, now.month - 2, 1),
+      firstDate: DateTime(now.year - 2, 1, 1),
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF6366F1),
+              onPrimary: Colors.white,
+              surface: Color(0xFF1A1C2A),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (start == null) return;
+
+    DateTime? end = await showDatePicker(
+      context: context,
+      initialDate: start,
+      firstDate: start,
+      lastDate: now,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF6366F1),
+              onPrimary: Colors.white,
+              surface: Color(0xFF1A1C2A),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (end == null) return;
+
+    int diffMonths = (end.year - start.year) * 12 + (end.month - start.month) + 1;
+
+    if (diffMonths > 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Maximum range allowed is 6 months"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
-    return max > 0 ? max + 1000 : 5000;
+
+    if (mounted) {
+      setState(() {
+        _customStartMonth = DateTime(start.year, start.month, 1);
+        _customEndMonth = DateTime(end.year, end.month, 1);
+        _monthFilter = 99;
+        _generateCustomMonths();
+      });
+    }
   }
 
-  Widget _summaryCards() {
-    double totalIncome = balanceSummary['total_earnings']?.toDouble() ?? 0;
-    double totalExpenses = balanceSummary['total_expenses']?.toDouble() ?? 0;
-    double currentBalance = balanceSummary['current_balance']?.toDouble() ?? 0;
-    double profitMargin = totalIncome > 0
-        ? (currentBalance / totalIncome) * 100
-        : 0;
+  double _getMaxIncomeExpenseValue() {
+    double maxValue = 0;
 
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(totalIncome)}",
-                label: "Total Income",
-                color: Colors.greenAccent,
+    for (int i = 0; i < _months.length; i++) {
+      if (_incomeChartData[i] > maxValue) {
+        maxValue = _incomeChartData[i];
+      }
+      if (_expenseChartData[i] > maxValue) {
+        maxValue = _expenseChartData[i];
+      }
+    }
+
+    return maxValue == 0 ? 10000 : maxValue * 1.3;
+  }
+
+  String _selectedOverviewFilter = "Month";
+
+  final List<String> _overviewFilters = [
+    "Month",
+    "3 Months",
+    "6 Months",
+    "1 Year",
+    "Custom"
+  ];
+
+  double _filteredIncome = 0;
+  double _filteredExpenses = 0;
+
+  Widget _summaryCards() {
+    double income = _filteredIncome;
+    double expenses = _filteredExpenses;
+    double profit = income - expenses;
+    double margin = income > 0 ? (profit / income) * 100 : 0;
+
+    return _glassCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          /// Header + Filter
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+
+              const Text(
+                "Overview",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(totalExpenses)}",
-                label: "Total Expenses",
-                color: Colors.redAccent,
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedOverviewFilter,
+                    dropdownColor: const Color(0xFF1A1C2A),
+                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                    items: _overviewFilters.map((value) {
+                      return DropdownMenuItem(
+                        value: value,
+                        child: Text(value),
+                      );
+                    }).toList(),
+                    onChanged: (v) async {
+
+                      if (v == "Custom") {
+                        await _selectCustomMonthRange();
+                      } else {
+                        setState(() {
+                          _selectedOverviewFilter = v!;
+                          _applyOverviewFilter();
+                        });
+                      }
+
+                    },
+                  ),
+                ),
+              )
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          Row(
+            children: [
+
+              Expanded(
+                child: _squareStatCard(
+                  value: "₹${NumberFormat('#,##0').format(income)}",
+                  label: "Income",
+                  color: Colors.greenAccent,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _squareStatCard(
-                value: "₹${NumberFormat('#,##0').format(currentBalance)}",
-                label: "Net Profit",
-                color: Colors.blueAccent,
+
+              const SizedBox(width: 16),
+
+              Expanded(
+                child: _squareStatCard(
+                  value: "₹${NumberFormat('#,##0').format(expenses)}",
+                  label: "Expenses",
+                  color: Colors.redAccent,
+                ),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: _squareStatCard(
-                value: "${profitMargin.toStringAsFixed(1)}%",
-                label: "Profit Margin",
-                color: Colors.purpleAccent,
+
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          Row(
+            children: [
+
+              Expanded(
+                child: _squareStatCard(
+                  value: "₹${NumberFormat('#,##0').format(profit)}",
+                  label: "Profit",
+                  color: Colors.blueAccent,
+                ),
               ),
-            ),
-          ],
-        ),
-      ],
+
+              const SizedBox(width: 16),
+
+              Expanded(
+                child: _squareStatCard(
+                  value: "${margin.toStringAsFixed(1)}%",
+                  label: "Margin",
+                  color: Colors.purpleAccent,
+                ),
+              ),
+
+            ],
+          ),
+        ],
+      ),
     );
+  }
+
+  void _applyOverviewFilter() {
+
+    DateTime now = DateTime.now();
+    DateTime startDate;
+
+    switch (_selectedOverviewFilter) {
+
+      case "Month":
+        startDate = DateTime(now.year, now.month, 1);
+        break;
+
+      case "3 Months":
+        startDate = DateTime(now.year, now.month - 2, 1);
+        break;
+
+      case "6 Months":
+        startDate = DateTime(now.year, now.month - 5, 1);
+        break;
+
+      case "1 Year":
+        startDate = DateTime(now.year - 1, now.month, 1);
+        break;
+
+      default:
+        startDate = DateTime(now.year, now.month, 1);
+    }
+
+    double income = 0;
+    double expenseTotal = 0;
+
+    for (var inv in recentInvoices) {
+      DateTime date = DateTime.parse(inv['date_issued']);
+      if (date.isAfter(startDate)) {
+        income += (inv['amount'] as num).toDouble();
+      }
+    }
+
+    for (var exp in expenses) {
+      DateTime date = DateTime.parse(exp['date_incurred']);
+      if (date.isAfter(startDate)) {
+        expenseTotal += (exp['amount'] as num).toDouble();
+      }
+    }
+
+    setState(() {
+      _filteredIncome = income;
+      _filteredExpenses = expenseTotal;
+    });
+
   }
 
   Widget _squareStatCard({
@@ -1362,13 +1661,9 @@ class _HomeScreenState extends State<HomeScreen>
                 onPressed: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(
-                      builder: (_) => const InvoiceDashboardScreen(),
-                    ),
+                    MaterialPageRoute(builder: (_) => const InvoiceDashboardScreen()),
                   ).then((_) {
-                    if (mounted) {
-                      _loadRecentInvoices();
-                    }
+                    if (mounted) _loadRecentInvoices();
                   });
                 },
                 child: const Text(
@@ -1379,194 +1674,99 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
           const SizedBox(height: 20),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowColor: WidgetStateProperty.all(
-                    Colors.white.withOpacity(0.1),
-                  ),
-                  dataRowColor: WidgetStateProperty.all(Colors.transparent),
-                  headingTextStyle: const TextStyle(
-                    color: Colors.white70,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
-                  ),
-                  dataTextStyle: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                  ),
-                  columns: const [
-                    DataColumn(label: Text('Invoice #')),
-                    DataColumn(label: Text('Client')),
-                    DataColumn(label: Text('Amount')),
-                    DataColumn(label: Text('Date')),
-                    DataColumn(label: Text('Status')),
-                    DataColumn(label: Text('Actions')),
-                  ],
-                  rows: recentInvoices.isEmpty
-                      ? [
-                          DataRow(
-                            cells: [
-                              DataCell(Container()),
-                              DataCell(Container()),
-                              DataCell(Container()),
-                              DataCell(Container()),
-                              DataCell(Container()),
-                              DataCell(Container()),
-                            ],
-                          ),
-                        ]
-                      : recentInvoices.take(5).map((inv) {
-                          final status =
-                              inv['status']?.toString().toUpperCase() ??
-                              'DRAFT';
-
-                          Color getStatusColor() {
-                            switch (status) {
-                              case 'PAID':
-                                return const Color(0xFF22C55E);
-                              case 'OVERDUE':
-                                return const Color(0xFFEF4444);
-                              case 'DRAFT':
-                                return const Color(0xFF6B7280);
-                              default:
-                                return const Color(0xFFF59E0B);
-                            }
-                          }
-
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                Text(
-                                  inv['id']?.toString() ?? '',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  inv['client_name']?.toString() ?? '',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  "₹${NumberFormat('#,##0.00').format(inv['amount'] ?? 0)}",
-                                  style: const TextStyle(
-                                    color: Color(0xFF5B8CFF),
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  DateFormat(
-                                    'dd MMM yyyy',
-                                  ).format(DateTime.parse(inv['date_issued'])),
-                                ),
-                              ),
-                              DataCell(
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: getStatusColor().withOpacity(0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(
-                                      color: getStatusColor().withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    status,
-                                    style: TextStyle(
-                                      color: getStatusColor(),
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => InvoiceDetailScreen(
-                                              invoice: inv,
-                                            ),
-                                          ),
-                                        ).then((_) => _loadRecentInvoices());
-                                      },
-                                      icon: Icon(
-                                        Icons.visibility_outlined,
-                                        size: 18,
-                                        color: Colors.white.withOpacity(0.7),
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    IconButton(
-                                      onPressed: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => CreateInvoiceScreen(
-                                              invoiceToEdit: inv,
-                                            ),
-                                          ),
-                                        ).then((result) {
-                                          if (result == true) {
-                                            _loadRecentInvoices();
-                                          }
-                                        });
-                                      },
-                                      icon: Icon(
-                                        Icons.edit_outlined,
-                                        size: 18,
-                                        color: Colors.white.withOpacity(0.7),
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          );
-                        }).toList(),
-                ),
-              ),
-            ),
-          ),
           if (recentInvoices.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(20),
-              child: Center(
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(20),
                 child: Text(
                   "No invoices yet",
                   style: TextStyle(color: Colors.white54),
                 ),
               ),
+            )
+          else
+            ...recentInvoices.take(3).map((inv) => _invoiceTile(inv)).toList(),
+        ],
+      ),
+    );
+  }
+
+  Widget _invoiceTile(dynamic inv) {
+    final status = inv['status']?.toString().toUpperCase() ?? 'DRAFT';
+
+    Color getStatusColor() {
+      switch (status) {
+        case 'PAID':
+          return const Color(0xFF22C55E);
+        case 'OVERDUE':
+          return const Color(0xFFEF4444);
+        case 'DRAFT':
+          return const Color(0xFF6B7280);
+        default:
+          return const Color(0xFFF59E0B);
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  inv['client_name'] ?? 'Client',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Invoice #${inv['id']}',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                "₹${NumberFormat('#,##0').format(inv['amount'] ?? 0)}",
+                style: const TextStyle(
+                  color: Color(0xFF5B8CFF),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: getStatusColor().withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  status,
+                  style: TextStyle(
+                    color: getStatusColor(),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -1574,38 +1774,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _loadRecentInvoices() async {
     try {
-      final supabase = invoice_service.SupabaseService();
-      final invoices = await supabase.getRecentInvoices(limit: 5);
+      final service = invoice_service.SupabaseService();
+      final invoices = await service.getRecentInvoices(limit: 5);
       if (mounted) {
-        setState(() {
-          recentInvoices = invoices;
-        });
+        setState(() => recentInvoices = invoices);
       }
     } catch (e) {
       print('Error loading recent invoices: $e');
     }
-  }
-
-  String _getInitials(String name) {
-    if (name.isEmpty) return '?';
-    List<String> parts = name.split(' ');
-    if (parts.length > 1) {
-      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    }
-    return name[0].toUpperCase();
-  }
-
-  Widget _invoiceHeader() {
-    return Row(
-      children: const [
-        SizedBox(width: 120, child: _HeaderText("INVOICE #")),
-        SizedBox(width: 220, child: _HeaderText("CLIENT")),
-        SizedBox(width: 120, child: _HeaderText("AMOUNT")),
-        SizedBox(width: 120, child: _HeaderText("DATE")),
-        SizedBox(width: 120, child: _HeaderText("STATUS")),
-        SizedBox(width: 200, child: _HeaderText("ACTIONS")),
-      ],
-    );
   }
 
   Widget _overviewSection() {
@@ -1614,99 +1790,10 @@ class _HomeScreenState extends State<HomeScreen>
     double expenses = balanceSummary['total_expenses']?.toDouble() ?? 450000;
     double netProfit = income - expenses;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _netBalanceCard(balance, income, expenses, netProfit),
-        const SizedBox(height: 20),
-      ],
-    );
+    return _netBalanceCard(balance, income, expenses, netProfit);
   }
 
-  String _calculateChange(double value) {
-    if (value > 10000) return '12';
-    if (value > 5000) return '8';
-    return '4';
-  }
-
-  Widget _overviewCard(
-    String title,
-    String amount,
-    String percent, {
-    bool isLarge = false,
-  }) {
-    bool isNegative = percent.contains("-");
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: isLarge ? 22 : 18,
-          ),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            gradient: LinearGradient(
-              colors: [
-                const Color(0xFF1E293B).withOpacity(0.6),
-                const Color(0xFF0F172A).withOpacity(0.6),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            border: Border.all(color: Colors.white.withOpacity(0.15)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(fontSize: 12, color: Colors.white60),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                amount,
-                style: TextStyle(
-                  fontSize: isLarge ? 24 : 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isNegative ? Icons.arrow_downward : Icons.arrow_upward,
-                    size: 14,
-                    color: isNegative ? Colors.red : Colors.green,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    percent,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: isNegative ? Colors.red : Colors.green,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _netBalanceCard(
-    double balance,
-    double income,
-    double expenses,
-    double netProfit,
-  ) {
+  Widget _netBalanceCard(double balance, double income, double expenses, double netProfit) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
@@ -1745,23 +1832,6 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  _pill(
-                    icon: Icons.arrow_upward,
-                    text: "+12%",
-                    color: Colors.greenAccent,
-                    bgColor: Colors.green.withOpacity(0.15),
-                  ),
-                  const SizedBox(width: 12),
-                  _pill(
-                    text: "64% Margin",
-                    color: const Color(0xFFB794F4),
-                    bgColor: const Color(0xFFB794F4).withOpacity(0.15),
-                  ),
-                ],
-              ),
               const SizedBox(height: 22),
               Row(
                 children: [
@@ -1769,8 +1839,8 @@ class _HomeScreenState extends State<HomeScreen>
                     child: _miniStatCard(
                       "INCOME",
                       "₹${NumberFormat.compact().format(income)}",
-                      "+4%",
-                      isPositive: true,
+                      Icons.arrow_upward,
+                      Colors.green,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1778,8 +1848,8 @@ class _HomeScreenState extends State<HomeScreen>
                     child: _miniStatCard(
                       "EXPENSES",
                       "₹${NumberFormat.compact().format(expenses)}",
-                      "-2%",
-                      isPositive: false,
+                      Icons.arrow_downward,
+                      Colors.red,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1787,8 +1857,8 @@ class _HomeScreenState extends State<HomeScreen>
                     child: _miniStatCard(
                       "NET PROFIT",
                       "₹${NumberFormat.compact().format(netProfit)}",
-                      "All time",
-                      isLabelOnly: true,
+                      null,
+                      Colors.blue,
                     ),
                   ),
                 ],
@@ -1800,45 +1870,7 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _pill({
-    IconData? icon,
-    required String text,
-    required Color color,
-    required Color bgColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _miniStatCard(
-    String title,
-    String value,
-    String bottomText, {
-    bool isPositive = true,
-    bool isLabelOnly = false,
-  }) {
+  Widget _miniStatCard(String title, String value, IconData? icon, Color color) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1866,16 +1898,10 @@ class _HomeScreenState extends State<HomeScreen>
               color: Colors.white,
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            bottomText,
-            style: TextStyle(
-              fontSize: 11,
-              color: isLabelOnly
-                  ? Colors.white38
-                  : (isPositive ? Colors.green : Colors.red),
-            ),
-          ),
+          if (icon != null) ...[
+            const SizedBox(height: 6),
+            Icon(icon, size: 14, color: color),
+          ],
         ],
       ),
     );
@@ -1904,169 +1930,13 @@ class _HomeScreenState extends State<HomeScreen>
         labelColor: Colors.white,
         unselectedLabelColor: Colors.white60,
         labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
-        unselectedLabelStyle: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
+        unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
         indicatorSize: TabBarIndicatorSize.tab,
         dividerColor: Colors.transparent,
         padding: EdgeInsets.zero,
         indicatorPadding: EdgeInsets.zero,
         tabs: tabs.map((tab) => Tab(text: tab)).toList(),
       ),
-    );
-  }
-
-  Widget _tabItem(String title, {bool isActive = false}) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          gradient: isActive
-              ? const LinearGradient(
-                  colors: [Color(0xFF8B5CF6), Color(0xFF6366F1)],
-                )
-              : null,
-        ),
-        child: Center(
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: isActive ? Colors.white : Colors.white54,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _invoiceRow({
-    required String id,
-    required String client,
-    required String initials,
-    required String amount,
-    required String date,
-    required bool paid,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 120,
-            child: Text(
-              id,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 220,
-            child: Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: paid
-                          ? [Colors.pinkAccent, Colors.purpleAccent]
-                          : [Colors.greenAccent, Colors.teal],
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    initials,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    client,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            width: 120,
-            child: Text(
-              amount,
-              style: const TextStyle(
-                color: Colors.greenAccent,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 120,
-            child: Text(date, style: const TextStyle(color: Colors.white70)),
-          ),
-          SizedBox(
-            width: 120,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: paid
-                    ? Colors.green.withOpacity(0.15)
-                    : Colors.orange.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                paid ? "● PAID" : "● PENDING",
-                style: TextStyle(
-                  fontSize: 11,
-                  color: paid ? Colors.greenAccent : Colors.orangeAccent,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-          SizedBox(
-            width: 200,
-            child: Align(
-              alignment: Alignment.center,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _actionButton(Icons.visibility, Colors.blueAccent),
-                  const SizedBox(width: 8),
-                  _actionButton(Icons.edit, Colors.orangeAccent),
-                  const SizedBox(width: 8),
-                  _actionButton(Icons.download, Colors.greenAccent),
-                  const SizedBox(width: 8),
-                  _actionButton(Icons.delete, Colors.redAccent),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionButton(IconData icon, Color color) {
-    return Container(
-      width: 34,
-      height: 34,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withOpacity(0.15)),
-      ),
-      child: Icon(icon, size: 16, color: color),
     );
   }
 
@@ -2082,58 +1952,58 @@ class _HomeScreenState extends State<HomeScreen>
         _GlassAction(
           icon: Icons.add,
           label: "Expense",
-          gradient: [const Color(0xFF667EEA), const Color(0xFF764BA2)],
+          gradient: const [Color(0xFF667EEA), Color(0xFF764BA2)],
           onTap: () => setState(() => _currentIndex = 1),
         ),
         _GlassAction(
           icon: Icons.receipt_long,
           label: "Invoice",
-          gradient: [const Color(0xFF43CEA2), const Color(0xFF185A9D)],
+          gradient: const [Color(0xFF43CEA2), Color(0xFF185A9D)],
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => InvoiceDashboardScreen()),
+              MaterialPageRoute(builder: (_) => const InvoiceDashboardScreen()),
             );
           },
         ),
         _GlassAction(
           icon: Icons.mic,
           label: "Voice AI",
-          gradient: [const Color(0xFFFF512F), const Color(0xFFDD2476)],
+          gradient: const [Color(0xFFFF512F), Color(0xFFDD2476)],
           onTap: () => setState(() => _currentIndex = 2),
         ),
         _GlassAction(
           icon: Icons.pie_chart_outline,
           label: "Budget",
-          gradient: [const Color(0xFF11998E), const Color(0xFF38EF7D)],
+          gradient: const [Color(0xFF11998E), Color(0xFF38EF7D)],
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => BudgetTrackingScreen()),
+              MaterialPageRoute(builder: (_) => const BudgetTrackingScreen()),
             );
           },
         ),
         _GlassAction(
           icon: Icons.people_outline,
           label: "Clients",
-          gradient: [const Color(0xFFFF9966), const Color(0xFFFF5E62)],
+          gradient: const [Color(0xFFFF9966), Color(0xFFFF5E62)],
           onTap: () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => ClientManagementScreen()),
+              MaterialPageRoute(builder: (_) => const ClientManagementScreen()),
             );
           },
         ),
         _GlassAction(
           icon: Icons.trending_up,
           label: "Invest",
-          gradient: [const Color(0xFF00C6FF), const Color(0xFF0072FF)],
+          gradient: const [Color(0xFF00C6FF), Color(0xFF0072FF)],
           onTap: () => setState(() => _currentIndex = 3),
         ),
         _GlassAction(
           icon: Icons.analytics_outlined,
           label: "Business",
-          gradient: [const Color(0xFFFC4A1A), const Color(0xFFF7B733)],
+          gradient: const [Color(0xFFFC4A1A), Color(0xFFF7B733)],
           onTap: () {
             Navigator.push(
               context,
@@ -2146,7 +2016,7 @@ class _HomeScreenState extends State<HomeScreen>
         _GlassAction(
           icon: Icons.calculate_outlined,
           label: "Tax",
-          gradient: [const Color(0xFF8E2DE2), const Color(0xFF4A00E0)],
+          gradient: const [Color(0xFF8E2DE2), Color(0xFF4A00E0)],
           onTap: () {
             Navigator.push(
               context,
@@ -2231,13 +2101,6 @@ class _GlassAction extends StatelessWidget {
                 end: Alignment.bottomRight,
               ),
               border: Border.all(color: Colors.white.withOpacity(0.2)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.15),
-                  blurRadius: 15,
-                  offset: const Offset(0, 8),
-                ),
-              ],
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 12),
@@ -2298,24 +2161,6 @@ class _Legend extends StatelessWidget {
         const SizedBox(width: 6),
         Text(text, style: const TextStyle(color: Colors.white70, fontSize: 12)),
       ],
-    );
-  }
-}
-
-class _HeaderText extends StatelessWidget {
-  final String text;
-  const _HeaderText(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        fontSize: 11,
-        letterSpacing: 1,
-        color: Colors.white54,
-        fontWeight: FontWeight.w600,
-      ),
     );
   }
 }

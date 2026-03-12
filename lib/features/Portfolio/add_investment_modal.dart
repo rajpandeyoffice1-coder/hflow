@@ -7,12 +7,16 @@ class AddInvestmentModal extends StatefulWidget {
   final Investment? investment;
   final List<Category> categories;
   final Function(Investment) onSave;
+  final List<FinancialGoal> goals;
+  final String? goalId;
 
   const AddInvestmentModal({
     super.key,
     this.investment,
     required this.categories,
+    required this.goals,
     required this.onSave,
+    this.goalId,
   });
 
   @override
@@ -30,6 +34,7 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
   late String _selectedOwner;
   String _selectedPaymentMethod = '';
   int? _selectedCategoryId;
+  String? _selectedGoalId;
 
   @override
   void initState() {
@@ -61,40 +66,121 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
       _selectedCategory = '';
       _selectedOwner = 'Hari';
       _commentsController = TextEditingController();
+      _selectedGoalId = widget.investment?.goalId ?? widget.goalId;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF0B0F1A),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildHeader(),
-          Flexible(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  _buildDateAndAmountRow(),
-                  const SizedBox(height: 16),
-                  _buildCategoryRow(),
-                  const SizedBox(height: 16),
-                  _buildOwnerAndPaymentRow(),
-                  const SizedBox(height: 16),
-                  _buildCommentsField(),
-                ],
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.6,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF0B0F1A),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(color: Colors.white.withOpacity(0.12)),
+          ),
+          child: Column(
+            children: [
+              _buildHeader(),
+
+              /// SCROLLABLE FORM
+              Expanded(
+                child: SingleChildScrollView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      _buildDateAndAmountRow(),
+                      const SizedBox(height: 16),
+                      _buildCategoryRow(),
+                      const SizedBox(height: 16),
+                      _buildOwnerAndPaymentRow(),
+                      const SizedBox(height: 16),
+                      _buildGoalSelector(),
+                      const SizedBox(height: 16),
+                      _buildCommentsField(),
+                    ],
+                  ),
+                ),
+              ),
+
+              _buildFooter(),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGoalSelector() {
+    if (widget.goals.isEmpty) return const SizedBox();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Financial Goal',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.8),
+            fontSize: 12,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButton<String?>(
+            value: _selectedGoalId,
+            hint: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                'Link Goal (Optional)',
+                style: TextStyle(color: Colors.white38),
               ),
             ),
+            isExpanded: true,
+            dropdownColor: const Color(0xFF1A1F2E),
+            underline: const SizedBox(),
+            icon: const Icon(Icons.flag, color: Colors.white),
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'No Goal',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+              ...widget.goals.map((goal) {
+                return DropdownMenuItem<String?>(
+                  value: goal.id,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      '${goal.icon} ${goal.name}',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _selectedGoalId = value;
+              });
+            },
           ),
-          _buildFooter(),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -565,37 +651,70 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
   }
 
   void _handleSave() {
+
     if (_amountController.text.isEmpty || _selectedCategory.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please fill all required fields'),
           backgroundColor: Color(0xFFEF4444),
-          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
     }
 
+    final amount = double.parse(_amountController.text);
+
+    /// CHECK GOAL LIMIT
+    if (_selectedGoalId != null) {
+
+      final goal = widget.goals.firstWhere(
+            (g) => g.id == _selectedGoalId,
+      );
+
+      double currentGoalAmount = goal.currentAmount;
+
+      /// when editing subtract previous amount
+      if (widget.investment != null &&
+          widget.investment!.goalId == _selectedGoalId) {
+        currentGoalAmount -= widget.investment!.amount;
+      }
+
+      if (currentGoalAmount + amount > goal.targetAmount) {
+
+        final remaining = goal.targetAmount - currentGoalAmount;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Goal limit exceeded.\nRemaining allowed: ₹${remaining.toStringAsFixed(0)}",
+            ),
+            backgroundColor: const Color(0xFFEF4444),
+          ),
+        );
+
+        return;
+      }
+    }
+
     final investment = Investment(
-      id:
-          widget.investment?.id ??
+      id: widget.investment?.id ??
           DateTime.now().millisecondsSinceEpoch.toString(),
-      date: _dateController.text.isNotEmpty
-          ? _dateController.text
-          : DateFormat('yyyy-MM-dd').format(DateTime.now()),
+      date: _dateController.text,
       category: _selectedCategory,
       subCategory: _selectedSubCategory,
-      amount: double.parse(_amountController.text),
+      amount: amount,
       owner: _selectedOwner,
       paymentMethod: _selectedPaymentMethod,
       comments: _commentsController.text,
       redeemedAmount: widget.investment?.redeemedAmount ?? 0,
       redemptions: widget.investment?.redemptions ?? [],
       categoryId: _selectedCategoryId,
+      goalId: _selectedGoalId,
     );
 
     widget.onSave(investment);
   }
+
 
   @override
   void dispose() {

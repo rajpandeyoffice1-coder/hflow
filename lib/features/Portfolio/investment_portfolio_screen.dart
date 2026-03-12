@@ -44,13 +44,16 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   // Selected investments for bulk actions
   final Set<String> _selectedInvestmentIds = {};
 
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_handleTabChange);
     _provider = Provider.of<InvestmentProvider>(context, listen: false);
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadData();
+    });
   }
 
   Future<void> _loadData() async {
@@ -107,6 +110,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: "invPortFAB",
         onPressed: () => _showAddInvestmentModal(),
         backgroundColor: const Color(0xFF5B8CFF),
         child: const Icon(Icons.add, color: Colors.white),
@@ -179,12 +183,23 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          _buildOwnerChip('All', 'all', Icons.group),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildOwnerChip('All', 'all', Icons.group),
+                  const SizedBox(width: 8),
+                  _buildOwnerChip('Hari', 'Hari', Icons.person),
+                  const SizedBox(width: 8),
+                  _buildOwnerChip('Sangeetha', 'Sangeetha', Icons.person_outline),
+                ],
+              ),
+            ),
+          ),
+
           const SizedBox(width: 8),
-          _buildOwnerChip('Hari', 'Hari', Icons.person),
-          const SizedBox(width: 8),
-          _buildOwnerChip('Sangeetha', 'Sangeetha', Icons.person_outline),
-          const Spacer(),
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
@@ -273,7 +288,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                   Row(
                     children: [
                       const Text(
-                        'Current Wealth',
+                        'Current \nWealth',
                         style: TextStyle(color: Colors.white70, fontSize: 11),
                       ),
                       const Spacer(),
@@ -344,7 +359,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'Projected (5Y)',
+                    'Projected \n(5Y)',
                     style: TextStyle(color: Colors.white70, fontSize: 11),
                   ),
                   const SizedBox(height: 4),
@@ -387,7 +402,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
           indicatorSize: TabBarIndicatorSize.tab,
           dividerColor: Colors.transparent,
           splashFactory: NoSplash.splashFactory,
-          overlayColor: WidgetStateProperty.all(Colors.transparent),
+          overlayColor: MaterialStateProperty.all(Colors.transparent),
           labelPadding: EdgeInsets.zero,
           indicator: BoxDecoration(
             color: const Color(0xFF5B8CFF),
@@ -633,14 +648,86 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               ),
             )
           else
-            ...goals.map((goal) => _buildGoalItem(goal)),
+            ...goals.map((goal) => _buildGoalItem(goal, provider)),
         ],
       ),
     );
   }
 
-  Widget _buildGoalItem(FinancialGoal goal) {
-    double progress = goal.currentAmount / goal.targetAmount;
+  Widget _buildGoalProgress(InvestmentProvider provider) {
+
+    final goalTotals = provider.calculateGoalInvestments();
+
+    return Column(
+      children: provider.financialGoals.map((goal) {
+
+        final invested = goalTotals[goal.id] ?? 0;
+
+        final progress = invested / goal.targetAmount;
+
+        return Card(
+          child: ListTile(
+            title: Text(goal.name),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                LinearProgressIndicator(value: progress),
+                Text(
+                  "₹${invested.toStringAsFixed(0)} / ₹${goal.targetAmount.toStringAsFixed(0)}",
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  List<PieChartSectionData> buildPieSections(
+      Map<int, double> totals,
+      List<Category> categories,
+      ) {
+
+    List<PieChartSectionData> sections = [];
+
+    totals.forEach((categoryId, amount) {
+
+      final category =
+      categories.firstWhere((c) => c.id == categoryId);
+
+      sections.add(
+        PieChartSectionData(
+          value: amount,
+          title: category.name,
+        ),
+      );
+    });
+
+    return sections;
+  }
+
+  Widget _buildCategoryPie(InvestmentProvider provider) {
+
+    final totals = provider.calculateCategoryTotals();
+
+    final sections =
+    buildPieSections(totals, provider.categories);
+
+    return PieChart(
+      PieChartData(
+        sections: sections,
+      ),
+    );
+  }
+
+  Widget _buildGoalItem(FinancialGoal goal, InvestmentProvider provider){
+    final provider = Provider.of<InvestmentProvider>(context, listen:false);
+
+    final goalTotals = provider.calculateGoalInvestments();
+
+    final invested = goalTotals[goal.id] ?? 0;
+
+    double progress = invested / goal.targetAmount;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -727,7 +814,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '₹${_formatNumber(goal.currentAmount)}',
+                '₹${_formatNumber(invested)}',
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 11,
@@ -749,7 +836,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
 
   Widget _buildPortfolioDistribution(InvestmentProvider provider) {
     final distribution = provider.getCategoryDistribution(owner: _selectedOwner);
-    
+    print(provider.getCategoryDistribution());
     if (distribution.isEmpty) {
       return GlassCard(
         child: const Center(
@@ -958,7 +1045,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                   ),
                   const SizedBox(height: 4),
                   LinearProgressIndicator(
-                    value: entry.value / total,
+                    value: (entry.value / total).toDouble(),
                     backgroundColor: Colors.white.withOpacity(0.1),
                     valueColor: AlwaysStoppedAnimation<Color>(
                       provider.getCategoryColor(entry.key),
@@ -1096,26 +1183,32 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   Widget _buildInvestmentsTab(InvestmentProvider provider) {
-    return Column(
-      children: [
-        _buildSearchAndFilterBar(),
-        _buildViewToggle(),
-        if (_selectedInvestmentIds.isNotEmpty)
-          _buildBulkActionsBar(),
-        _buildPaginationControls(),
-        Expanded(
-          child: _buildInvestmentList(provider),
-        ),
-      ],
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 100),
+      child: Column(
+        children: [
+          _buildSearchAndFilterBar(),
+          _buildViewToggle(),
+          if (_selectedInvestmentIds.isNotEmpty) _buildBulkActionsBar(),
+          _buildPaginationControls(),
+          _buildInvestmentList(provider),
+        ],
+      ),
     );
   }
 
   Widget _buildSearchAndFilterBar() {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Row(
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          Expanded(
+
+          /// SEARCH
+          SizedBox(
+            width: 260,
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.08),
@@ -1124,18 +1217,19 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               child: TextField(
                 controller: _searchController,
                 style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   hintText: '🔍 Search investments...',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                  hintStyle: TextStyle(color: Colors.white38),
+                  prefixIcon: Icon(Icons.search, color: Colors.white54),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  contentPadding: EdgeInsets.symmetric(vertical: 12),
                 ),
                 onChanged: (value) => setState(() => _searchQuery = value),
               ),
             ),
           ),
-          const SizedBox(width: 8),
+
+          /// CATEGORY
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
@@ -1150,18 +1244,14 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               items: [
                 const DropdownMenuItem(
                   value: 'all',
-                  child: Text(
-                    'All Categories',
-                    style: TextStyle(color: Colors.white),
-                  ),
+                  child: Text('All Categories',
+                      style: TextStyle(color: Colors.white)),
                 ),
                 ..._provider.categories.map((cat) {
                   return DropdownMenuItem(
                     value: cat.name,
-                    child: Text(
-                      '${cat.icon} ${cat.name}',
-                      style: const TextStyle(color: Colors.white),
-                    ),
+                    child: Text('${cat.icon} ${cat.name}',
+                        style: const TextStyle(color: Colors.white)),
                   );
                 }),
               ],
@@ -1172,7 +1262,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               },
             ),
           ),
-          const SizedBox(width: 8),
+
+          /// DATE RANGE
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
@@ -1187,23 +1278,28 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               items: const [
                 DropdownMenuItem(
                   value: 'all',
-                  child: Text('All Time', style: TextStyle(color: Colors.white)),
+                  child: Text('All Time',
+                      style: TextStyle(color: Colors.white)),
                 ),
                 DropdownMenuItem(
                   value: 'this-month',
-                  child: Text('This Month', style: TextStyle(color: Colors.white)),
+                  child: Text('This Month',
+                      style: TextStyle(color: Colors.white)),
                 ),
                 DropdownMenuItem(
                   value: 'last-3-months',
-                  child: Text('Last 3 Months', style: TextStyle(color: Colors.white)),
+                  child: Text('Last 3 Months',
+                      style: TextStyle(color: Colors.white)),
                 ),
                 DropdownMenuItem(
                   value: 'last-6-months',
-                  child: Text('Last 6 Months', style: TextStyle(color: Colors.white)),
+                  child: Text('Last 6 Months',
+                      style: TextStyle(color: Colors.white)),
                 ),
                 DropdownMenuItem(
                   value: 'this-year',
-                  child: Text('This Year', style: TextStyle(color: Colors.white)),
+                  child: Text('This Year',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
               onChanged: (value) {
@@ -1322,8 +1418,9 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        runSpacing: 8,
         children: [
           Row(
             children: [
@@ -1398,57 +1495,61 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
     final filtered = _getFilteredInvestments();
 
     if (filtered.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.05),
-              ),
-              child: const Icon(
-                Icons.trending_up,
-                size: 48,
-                color: Colors.white24,
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'No investments found',
-              style: TextStyle(color: Colors.white54, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Start tracking your investments to see them here',
-              style: TextStyle(color: Colors.white38, fontSize: 14),
-            ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _showAddInvestmentModal,
-              icon: const Icon(Icons.add, color: Colors.white),
-              label: const Text('Add Investment'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF5B8CFF),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 12,
+      return Padding(
+        padding: const EdgeInsets.only(top: 80),
+        child: Center(
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.05),
                 ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                child: const Icon(
+                  Icons.trending_up,
+                  size: 48,
+                  color: Colors.white24,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              const Text(
+                'No investments found',
+                style: TextStyle(color: Colors.white54, fontSize: 16),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Start tracking your investments to see them here',
+                style: TextStyle(color: Colors.white38, fontSize: 14),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _showAddInvestmentModal,
+                icon: const Icon(Icons.add, color: Colors.white),
+                label: const Text('Add Investment'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF5B8CFF),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
 
     if (_currentView == 'cards') {
       return GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           childAspectRatio: 0.85,
@@ -1461,10 +1562,10 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
         },
       );
     } else if (_currentView == 'table') {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+          scrollDirection: Axis.horizontal,
           child: _buildInvestmentTable(filtered),
         ),
       );
@@ -1508,8 +1609,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                       }
                     });
                   },
-                  fillColor: WidgetStateProperty.resolveWith((states) {
-                    if (states.contains(WidgetState.selected)) {
+                  fillColor: MaterialStateProperty.resolveWith((states) {
+                    if (states.contains(MaterialState.selected)) {
                       return const Color(0xFF5B8CFF);
                     }
                     return Colors.white.withOpacity(0.1);
@@ -1597,115 +1698,112 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   Widget _buildInvestmentTable(List<Investment> investments) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white.withOpacity(0.12)),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Table(
-        columnWidths: const {
-          0: FixedColumnWidth(50),
-          1: FixedColumnWidth(100),
-          2: FixedColumnWidth(120),
-          3: FixedColumnWidth(120),
-          4: FixedColumnWidth(80),
-          5: FixedColumnWidth(100),
-          6: FixedColumnWidth(150),
-          7: FixedColumnWidth(100),
-        },
-        border: TableBorder(
-          horizontalInside: BorderSide(
-            color: Colors.white.withOpacity(0.12),
-            width: 1,
-          ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columnSpacing: 24,
+        headingRowHeight: 48,
+        dataRowHeight: 60,
+        headingTextStyle: const TextStyle(
+          color: Colors.white70,
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
         ),
-        children: [
-          TableRow(
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-            ),
-            children: [
-              _buildTableHeaderCell(''),
-              _buildTableHeaderCell('Date'),
-              _buildTableHeaderCell('Category'),
-              _buildTableHeaderCell('Sub-Category'),
-              _buildTableHeaderCell('Owner'),
-              _buildTableHeaderCell('Amount'),
-              _buildTableHeaderCell('Comments'),
-              _buildTableHeaderCell('Actions'),
-            ],
-          ),
-          ...investments.map((inv) {
-            return TableRow(
-              children: [
-                TableCell(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Checkbox(
-                      value: _selectedInvestmentIds.contains(inv.id),
-                      onChanged: (checked) {
-                        setState(() {
-                          if (checked == true) {
-                            _selectedInvestmentIds.add(inv.id);
-                          } else {
-                            _selectedInvestmentIds.remove(inv.id);
-                          }
-                        });
-                      },
-                      fillColor: WidgetStateProperty.resolveWith((states) {
-                        if (states.contains(WidgetState.selected)) {
-                          return const Color(0xFF5B8CFF);
-                        }
-                        return Colors.white.withOpacity(0.1);
-                      }),
-                      checkColor: Colors.white,
-                      side: BorderSide(
-                        color: Colors.white.withOpacity(0.3),
-                        width: 1.5,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                    ),
-                  ),
-                ),
-                _buildTableCell(
-                  DateFormat('dd MMM yyyy').format(DateTime.parse(inv.date)),
-                ),
-                _buildTableCell('${_provider.getCategoryIcon(inv.category)} ${inv.category}'),
-                _buildTableCell(inv.subCategory ?? '-'),
-                _buildTableCell(inv.owner, color: inv.owner == 'Hari'
-                    ? const Color(0xFF5B8CFF)
-                    : const Color(0xFF10B981)),
-                _buildTableCell('₹${_formatNumber(inv.amount)}', isBold: true),
-                _buildTableCell(inv.comments.isNotEmpty ? inv.comments : '-'),
-                TableCell(
-                  child: Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Row(
-                      children: [
-                        _buildTableActionButton(
-                          icon: Icons.visibility,
-                          onPressed: () => _showInvestmentDetails(inv),
-                        ),
-                        _buildTableActionButton(
-                          icon: Icons.edit,
-                          color: const Color(0xFF5B8CFF),
-                          onPressed: () => _showEditInvestmentModal(inv),
-                        ),
-                        _buildTableActionButton(
-                          icon: Icons.delete,
-                          color: const Color(0xFFEF4444),
-                          onPressed: () => _showDeleteConfirmation(inv),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            );
-          }),
+        dataTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+        ),
+        columns: const [
+          DataColumn(label: Text('')),
+          DataColumn(label: Text('Date')),
+          DataColumn(label: Text('Category')),
+          DataColumn(label: Text('Sub Category')),
+          DataColumn(label: Text('Owner')),
+          DataColumn(label: Text('Amount')),
+          DataColumn(label: Text('Comments')),
+          DataColumn(label: Text('Actions')),
         ],
+        rows: investments.map((inv) {
+          return DataRow(
+            cells: [
+              DataCell(
+                Checkbox(
+                  value: _selectedInvestmentIds.contains(inv.id),
+                  onChanged: (checked) {
+                    setState(() {
+                      if (checked == true) {
+                        _selectedInvestmentIds.add(inv.id);
+                      } else {
+                        _selectedInvestmentIds.remove(inv.id);
+                      }
+                    });
+                  },
+                  fillColor: MaterialStateProperty.resolveWith((states) {
+                    if (states.contains(MaterialState.selected)) {
+                      return const Color(0xFF5B8CFF);
+                    }
+                    return Colors.white.withOpacity(0.1);
+                  }),
+                ),
+              ),
+
+              DataCell(
+                Text(DateFormat('dd MMM yyyy').format(DateTime.parse(inv.date))),
+              ),
+
+              DataCell(
+                Row(
+                  children: [
+                    Text(_provider.getCategoryIcon(inv.category)),
+                    const SizedBox(width: 6),
+                    Text(inv.category),
+                  ],
+                ),
+              ),
+
+              DataCell(Text(inv.subCategory ?? '-')),
+
+              DataCell(
+                Text(
+                  inv.owner,
+                  style: TextStyle(
+                    color: inv.owner == 'Hari'
+                        ? const Color(0xFF5B8CFF)
+                        : const Color(0xFF10B981),
+                  ),
+                ),
+              ),
+
+              DataCell(
+                Text(
+                  '₹${_formatNumber(inv.amount)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+
+              DataCell(Text(inv.comments.isNotEmpty ? inv.comments : '-')),
+
+              DataCell(
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.visibility, color: Colors.white70),
+                      onPressed: () => _showInvestmentDetails(inv),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.edit, color: Color(0xFF5B8CFF)),
+                      onPressed: () => _showEditInvestmentModal(inv),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete, color: Color(0xFFEF4444)),
+                      onPressed: () => _showDeleteConfirmation(inv),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -1753,6 +1851,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
 
   Widget _buildCalendarView(InvestmentProvider provider) {
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
@@ -1833,8 +1932,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       return date.year == _calendarCurrentMonth.year &&
           date.month == _calendarCurrentMonth.month;
     }).toList();
-    
-    double totalMonth = monthInvestments.fold(0, (sum, inv) => sum + inv.amount);
+
+    double totalMonth = monthInvestments.fold(0.0, (sum, inv) => sum + inv.amount);
     
     return Container(
       decoration: BoxDecoration(
@@ -2558,8 +2657,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
             (inv.subCategory?.toLowerCase().contains(_searchQuery.toLowerCase()) ??
                 false);
       }
-      
-      if (_selectedCategory != 'all' && inv.category != _selectedCategory) {
+
+      if (_selectedCategory != 'all' && inv.categoryId.toString() != _selectedCategory){
         return false;
       }
       
@@ -2616,6 +2715,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       backgroundColor: Colors.transparent,
       builder: (context) => AddInvestmentModal(
         categories: _provider.categories,
+        goals: _provider.financialGoals,
         onSave: (investment) async {
           await _provider.addInvestment(investment);
           if (mounted) {
@@ -2635,6 +2735,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       builder: (context) => AddInvestmentModal(
         investment: investment,
         categories: _provider.categories,
+        goals: _provider.financialGoals,
         onSave: (updated) async {
           await _provider.updateInvestment(updated);
           if (mounted) {
@@ -2916,9 +3017,96 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       ),
     );
   }
-
+  final deadlineController = TextEditingController();
   void _showAddGoalModal() {
-    // Implementation for adding financial goal
+    final nameController = TextEditingController();
+    final targetController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            "Create Financial Goal",
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Goal Name",
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: targetController,
+                keyboardType: TextInputType.number,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Target Amount",
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: deadlineController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "Deadline (YYYY-MM-DD)",
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+
+            ],
+          ),
+          actions: [
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final name = nameController.text;
+                final target = double.tryParse(targetController.text) ?? 0;
+
+                if (name.isEmpty || target <= 0) return;
+
+                await _provider.addGoal(
+                  FinancialGoal(
+                    id: '',
+                    name: name,
+                    targetAmount: target,
+                    currentAmount: 0,
+                    color: "#5B8CFF",
+                    icon: "🎯",
+                    deadline: deadlineController.text.isEmpty
+                        ? null
+                        : DateTime.parse(deadlineController.text),
+                  ),
+                );
+
+                if (mounted) {
+                  Navigator.pop(context);
+                  _showSnackBar("Goal created successfully");
+                }
+              },
+              child: const Text("Create"),
+            )
+          ],
+        );
+      },
+    );
   }
 
   void _showMoreOptions() {
@@ -2974,7 +3162,56 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   void _showManageCategoriesModal() {
-    // Implementation for managing categories
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            "Manage Categories",
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: controller,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: "New Category",
+                  labelStyle: TextStyle(color: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () {
+                  final name = controller.text.trim();
+                  if (name.isEmpty) return;
+
+                  _provider.addCategory(
+                      Category(
+                        id: DateTime.now().millisecondsSinceEpoch,
+                        name: name,
+                        icon: "💰",
+                        color: "#5B8CFF",
+                      )
+                  );
+
+                  Navigator.pop(context);
+                  _showSnackBar("Category added");
+                },
+                child: const Text("Add Category"),
+              )
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _exportPortfolio() {

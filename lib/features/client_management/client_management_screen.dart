@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'SupabaseServiceClient.dart';
 import '../../models/client_model.dart';
 import '../../core/widgets/client_journey_widget.dart';
+import '../invoice/invoice_detail.dart';
 
 class ClientManagementScreen extends StatefulWidget {
   const ClientManagementScreen({super.key});
@@ -222,6 +223,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
       ),
       floatingActionButton: !_isLoading && _error == null
           ? FloatingActionButton(
+              heroTag: "cmsFAB",
               onPressed: _showAddClientModal,
               backgroundColor: const Color(0xFF5B8CFF),
               child: const Icon(Icons.add, color: Colors.white),
@@ -666,7 +668,22 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
               ),
               child: Row(
                 children: [
-                  Expanded(child: Column(children: [Text(client.totalInvoices.toString(), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)), const SizedBox(height: 2), Text('Invoices', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10))])),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Text(client.invoices.length.toString(),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 2),
+                        Text('Invoices',
+                            style: TextStyle(
+                                color: Colors.white.withOpacity(0.5),
+                                fontSize: 10))
+                      ],
+                    ),
+                  ),
                   Container(height: 30, width: 1, color: Colors.white.withOpacity(0.1)),
                   Expanded(child: Column(children: [Text(currencyFormat.format(client.totalAmount), style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)), const SizedBox(height: 2), Text('Revenue', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10))])),
                 ],
@@ -834,6 +851,7 @@ class _ClientManagementScreenState extends State<ClientManagementScreen> {
           'type': 'invoice_paid',
           'date': invoice['paid_date'] ?? invoice['date_issued'] ?? invoice['date'],
           'amount': invoice['amount'],
+          'status': invoice['status'],
           'number': invoice['id'] ?? invoice['number'],
         });
       }
@@ -1014,61 +1032,101 @@ class __ClientFormModalState extends State<_ClientFormModal> {
   Widget build(BuildContext context) {
     final isEditing = widget.client != null;
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF0B0F1A),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0B0F1A).withOpacity(0.95),
-              border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
+    return DraggableScrollableSheet(
+      initialChildSize: 0.9,
+      minChildSize: 0.6,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF0B0F1A),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.1))),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [const Color(0xFF5B8CFF).withOpacity(0.2), const Color(0xFF5B8CFF).withOpacity(0.1)]),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(isEditing ? '✏️' : '➕', style: const TextStyle(fontSize: 18)),
+            child: SingleChildScrollView(
+              controller: scrollController,
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Colors.white.withOpacity(0.1)),
                       ),
-                      const SizedBox(width: 12),
-                      Text(isEditing ? 'Edit Client' : 'Add New Client', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600)),
-                      const Spacer(),
-                      IconButton(icon: const Icon(Icons.close, color: Colors.white70), onPressed: () => Navigator.pop(context)),
-                    ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                const Color(0xFF5B8CFF).withOpacity(0.2),
+                                const Color(0xFF5B8CFF).withOpacity(0.1),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            isEditing ? '✏️' : '➕',
+                            style: const TextStyle(fontSize: 18),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          isEditing ? 'Edit Client' : 'Add New Client',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Form(
-                    key: _formKey,
-                    child: SingleChildScrollView(
+
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Form(
+                      key: _formKey,
                       child: Column(
                         children: [
                           Row(
                             children: [
-                              Expanded(child: _buildField('Client Name *', _nameController, validator: (v) => v?.isEmpty == true ? 'Required' : null)),
+                              Expanded(
+                                child: _buildField(
+                                  'Client Name *',
+                                  _nameController,
+                                  validator: (v) =>
+                                  v?.isEmpty == true ? 'Required' : null,
+                                ),
+                              ),
                               const SizedBox(width: 16),
-                              Expanded(child: _buildField('Email *', _emailController, validator: (v) => v?.isEmpty == true ? 'Required' : v?.contains('@') == false ? 'Invalid email' : null)),
+                              Expanded(
+                                child: _buildField(
+                                  'Email *',
+                                  _emailController,
+                                  validator: (v) => v?.isEmpty == true
+                                      ? 'Required'
+                                      : v?.contains('@') == false
+                                      ? 'Invalid email'
+                                      : null,
+                                ),
+                              ),
                             ],
                           ),
+
                           const SizedBox(height: 16),
+
                           Row(
                             children: [
                               Expanded(child: _buildField('Phone', _phoneController)),
@@ -1076,18 +1134,25 @@ class __ClientFormModalState extends State<_ClientFormModal> {
                               Expanded(child: _buildField('Contact Person', _contactPersonController)),
                             ],
                           ),
+
                           const SizedBox(height: 16),
                           _buildField('Company', _companyController),
+
                           const SizedBox(height: 16),
                           _buildField('Address', _addressController, maxLines: 2),
+
                           const SizedBox(height: 16),
+
                           Row(
                             children: [
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text('Payment Terms', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                    const Text(
+                                      'Payment Terms',
+                                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
                                     const SizedBox(height: 8),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1102,7 +1167,7 @@ class __ClientFormModalState extends State<_ClientFormModal> {
                                         dropdownColor: const Color(0xFF1A1F2E),
                                         underline: const SizedBox(),
                                         icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
-                                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                                        style: const TextStyle(color: Colors.white),
                                         items: const [
                                           DropdownMenuItem(value: 'net_15_days', child: Text('Net 15 days')),
                                           DropdownMenuItem(value: 'net_30_days', child: Text('Net 30 days')),
@@ -1120,12 +1185,17 @@ class __ClientFormModalState extends State<_ClientFormModal> {
                                   ],
                                 ),
                               ),
+
                               const SizedBox(width: 16),
+
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Text('Status', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                                    const Text(
+                                      'Status',
+                                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                                    ),
                                     const SizedBox(height: 8),
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1140,7 +1210,7 @@ class __ClientFormModalState extends State<_ClientFormModal> {
                                         dropdownColor: const Color(0xFF1A1F2E),
                                         underline: const SizedBox(),
                                         icon: const Icon(Icons.arrow_drop_down, color: Colors.white70),
-                                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                                        style: const TextStyle(color: Colors.white),
                                         items: const [
                                           DropdownMenuItem(value: 'Active', child: Text('Active')),
                                           DropdownMenuItem(value: 'Inactive', child: Text('Inactive')),
@@ -1157,81 +1227,57 @@ class __ClientFormModalState extends State<_ClientFormModal> {
                               ),
                             ],
                           ),
+
+                          const SizedBox(height: 30),
+
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: () {
+                                    if (_formKey.currentState!.validate()) {
+                                      widget.onSave({
+                                        'name': _nameController.text,
+                                        'email': _emailController.text,
+                                        'phone': _phoneController.text.isEmpty
+                                            ? null
+                                            : _phoneController.text,
+                                        'contact_name': _contactPersonController.text.isEmpty
+                                            ? null
+                                            : _contactPersonController.text,
+                                        'company': _companyController.text.isEmpty
+                                            ? null
+                                            : _companyController.text,
+                                        'address': _addressController.text.isEmpty
+                                            ? null
+                                            : _addressController.text,
+                                        'payment_terms': _paymentTerms,
+                                        'status': _status,
+                                      });
+                                    }
+                                  },
+                                  child: Text(isEditing ? 'Update' : 'Save'),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: Colors.white.withOpacity(0.1))),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white70,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              side: BorderSide(color: Colors.white.withOpacity(0.2)),
-                            ),
-                          ),
-                          child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            if (_formKey.currentState!.validate()) {
-                              // Convert back to database format if needed
-                              String paymentTermsForDb = _paymentTerms;
-                              // If you need to convert to short format like 'net30', uncomment below
-                              // if (paymentTermsForDb == 'net_30_days') paymentTermsForDb = 'net30';
-                              // if (paymentTermsForDb == 'net_15_days') paymentTermsForDb = 'net15';
-                              // if (paymentTermsForDb == 'net_45_days') paymentTermsForDb = 'net45';
-                              // if (paymentTermsForDb == 'net_60_days') paymentTermsForDb = 'net60';
-                              
-                              widget.onSave({
-                                'name': _nameController.text,
-                                'email': _emailController.text,
-                                'phone': _phoneController.text.isEmpty ? null : _phoneController.text,
-                                'contact_name': _contactPersonController.text.isEmpty ? null : _contactPersonController.text,
-                                'company': _companyController.text.isEmpty ? null : _companyController.text,
-                                'address': _addressController.text.isEmpty ? null : _addressController.text,
-                                'payment_terms': paymentTermsForDb,
-                                'status': _status,
-                              });
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF5B8CFF),
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(isEditing ? '💾' : '➕', style: const TextStyle(fontSize: 16)),
-                              const SizedBox(width: 8),
-                              Text(isEditing ? 'Update' : 'Save', style: const TextStyle(fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

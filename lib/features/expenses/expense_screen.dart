@@ -2,6 +2,11 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:excel/excel.dart' hide Border;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
 
 class ExpenseScreen extends StatefulWidget {
   final VoidCallback? onBack;
@@ -46,22 +51,21 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   // Category colors
   final Map<String, Color> _categoryColors = {};
 
+  // Category ID map for lookups
+  final Map<String, String> _categoryIdMap = {};
+
   // Search summary
   Map<String, dynamic> _searchSummary = {'count': 0, 'total': 0.0};
+
+  // Current user ID (you should get this from your auth system)
+  final String _userId = 'default_user'; // Replace with actual user ID from auth
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-
-    // Set default date range to last 6 months
-    final now = DateTime.now();
-    _selectedDateRange = DateTimeRange(
-      start: DateTime(now.year, now.month - 6, now.day),
-      end: now,
-    );
-
     _searchController.addListener(_onSearchChanged);
+    _selectedDateRange = null;
     _loadData();
   }
 
@@ -79,14 +83,14 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         'count': filteredExpenses.length,
         'total': filteredExpenses.fold(
           0.0,
-          (sum, item) => sum + item['amount'],
+              (sum, item) => sum + (item['amount'] as double),
         ),
       };
     } else {
       final searchResults = _allExpenses.where((exp) {
         return exp['description'].toString().toLowerCase().contains(
-              _searchQuery.toLowerCase(),
-            ) ||
+          _searchQuery.toLowerCase(),
+        ) ||
             exp['category'].toString().toLowerCase().contains(
               _searchQuery.toLowerCase(),
             ) ||
@@ -100,9 +104,73 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       _searchSummary = {
         'count': searchResults.length,
-        'total': searchResults.fold(0.0, (sum, item) => sum + item['amount']),
+        'total': searchResults.fold(0.0, (sum, item) => sum + (item['amount'] as double)),
       };
     }
+  }
+
+  Future<String?> _createCategory(String name) async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      final response = await supabase
+          .from('expense_categories')
+          .insert({
+        'name': name,
+        'icon': '💰',
+        'color': '#6B7280',
+        'is_default': false,
+      })
+          .select()
+          .single();
+
+      final newCategoryName = response['name'];
+
+      // Reload categories from database
+      await _loadCategories();
+
+      return newCategoryName;
+    } catch (e) {
+      print("Error creating category: $e");
+      return null;
+    }
+  }
+
+  Future<String?> _showCreateCategoryDialog() async {
+    final controller = TextEditingController();
+
+    return showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          title: const Text(
+            "Create Category",
+            style: TextStyle(color: Colors.white),
+          ),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Category name",
+              hintStyle: TextStyle(color: Colors.white54),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context, controller.text.trim());
+              },
+              child: const Text("Create"),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _loadData() async {
@@ -113,12 +181,13 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
     try {
       await Future.wait([
-        _loadExpenses(),
         _loadCategories(),
+        _loadExpenses(),
         _loadMonthlyTrend(),
       ]);
       _calculateStats();
       _updateSearchSummary();
+      _updateBalanceSummary();
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading data: $e';
@@ -130,21 +199,81 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     }
   }
 
+  Future<void> _loadCategories() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final response = await supabase
+          .from('expense_categories')
+          .select()
+          .order('name');
+
+      setState(() {
+        // Remove duplicates by using a Map with name as key
+        final uniqueCategories = <String, Map<String, dynamic>>{};
+        for (var category in response) {
+          uniqueCategories[category['name']] = category;
+        }
+
+        _expenseCategories = uniqueCategories.values.toList();
+        _categoryIdMap.clear();
+        _categoryColors.clear();
+
+        // Update category colors and ID map
+        for (var category in _expenseCategories) {
+          _categoryColors[category['name']] = _parseColor(
+            category['color'] ?? '#6B7280',
+          );
+          _categoryIdMap[category['name']] = category['id'].toString();
+        }
+      });
+    } catch (e) {
+      print('Error loading categories: $e');
+      _loadDefaultCategories();
+    }
+  }
+
+  void _loadDefaultCategories() {
+    final defaultCategories = [
+      {'name': 'Food & Dining', 'color': '#ef4444', 'id': 'temp-1'},
+      {'name': 'Transportation', 'color': '#f59e0b', 'id': 'temp-2'},
+      {'name': 'Utilities', 'color': '#10b981', 'id': 'temp-3'},
+      {'name': 'Office Supplies', 'color': '#6366f1', 'id': 'temp-4'},
+      {'name': 'Software', 'color': '#8b5cf6', 'id': 'temp-5'},
+      {'name': 'Marketing', 'color': '#ec4899', 'id': 'temp-6'},
+      {'name': 'Travel', 'color': '#14b8a6', 'id': 'temp-7'},
+      {'name': 'Professional Services', 'color': '#64748b', 'id': 'temp-8'},
+    ];
+
+    setState(() {
+      _expenseCategories = defaultCategories;
+      for (var category in defaultCategories) {
+        _categoryColors[category['name']!] = _parseColor(category['color']!);
+        _categoryIdMap[category['name']!] = category['id']!;
+      }
+    });
+  }
+
   Future<void> _loadExpenses() async {
     try {
       final supabase = Supabase.instance.client;
 
       // Start with the base query
-      var query = supabase.from('expenses').select('''
-          *,
-          expense_categories (
-            name,
-            color,
-            icon
-          )
-        ''');
+      var query = supabase
+          .from('expenses')
+          .select('''
+            *,
+            expense_categories!left(
+              name,
+              color,
+              icon
+            )
+          ''');
 
-      // Apply date range filter FIRST
+      // Apply user filter
+      // Note: If your expenses table has user_id column, uncomment this
+      // query = query.eq('user_id', _userId);
+
+      // Apply date range filter
       if (_selectedDateRange != null) {
         query = query
             .gte('date_incurred', _selectedDateRange!.start.toIso8601String())
@@ -153,12 +282,12 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       // Apply category filter
       if (_selectedCategory != 'All') {
-        final category = _expenseCategories.firstWhere(
-          (cat) => cat['name'] == _selectedCategory,
-          orElse: () => {},
-        );
-        if (category.isNotEmpty) {
-          query = query.eq('category_id', category['id']);
+        final categoryId = _categoryIdMap[_selectedCategory];
+        if (categoryId != null && !categoryId.startsWith('temp-')) {
+          query = query.eq('category_id', categoryId);
+        } else {
+          // Fallback to category_name for temp categories
+          query = query.eq('category_name', _selectedCategory);
         }
       }
 
@@ -175,29 +304,34 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         query = query.eq('is_business_expense', true);
       }
 
-      // Apply sorting LAST - this returns a PostgrestTransformBuilder
-      // but we're just executing it, so it's fine
+      // Apply sorting and execute
       final response = await query.order('date_incurred', ascending: false);
 
       setState(() {
         _allExpenses = response.map<Map<String, dynamic>>((expense) {
-          final category =
-              expense['expense_categories'] as Map<String, dynamic>?;
+          final category = expense['expense_categories'] as Map<String, dynamic>?;
+
+          // Determine category name with proper fallback
+          String categoryName = 'Uncategorized';
+          if (category != null && category['name'] != null) {
+            categoryName = category['name'];
+          } else if (expense['category_name'] != null) {
+            categoryName = expense['category_name'];
+          }
+
           return {
-            'id': expense['id'],
+            'id': expense['id'].toString(),
             'date': DateTime.parse(expense['date_incurred']),
             'formattedDate': DateFormat(
               'dd MMM yyyy',
             ).format(DateTime.parse(expense['date_incurred'])),
-            'description': expense['description'],
+            'description': expense['description'] ?? '',
             'notes': expense['notes'] ?? '',
-            'amount': (expense['amount'] as num).toDouble(),
-            'category':
-                category?['name'] ??
-                expense['category_name'] ??
-                'Uncategorized',
+            'amount': (expense['amount'] as num?)?.toDouble() ?? 0.0,
+            'category': categoryName,
+            'category_id': expense['category_id']?.toString(),
             'paymentMethod':
-                expense['payment_method']?.toString().toUpperCase() ?? 'CASH',
+            expense['payment_method']?.toString().toUpperCase() ?? 'CASH',
             'vendor': expense['vendor_name'] ?? '-',
             'business': expense['is_business_expense'] ?? true,
             'taxDeductible': expense['tax_deductible'] ?? false,
@@ -210,49 +344,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       print('Error loading expenses: $e');
       rethrow;
     }
-  }
-
-  Future<void> _loadCategories() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final response = await supabase
-          .from('expense_categories')
-          .select()
-          .order('name');
-
-      setState(() {
-        _expenseCategories = response;
-        // Update category colors
-        for (var category in _expenseCategories) {
-          _categoryColors[category['name']] = _parseColor(
-            category['color'] ?? '#6B7280',
-          );
-        }
-      });
-    } catch (e) {
-      print('Error loading categories: $e');
-      _loadDefaultCategories();
-    }
-  }
-
-  void _loadDefaultCategories() {
-    final defaultCategories = [
-      {'name': 'Food & Dining', 'color': '#ef4444'},
-      {'name': 'Transportation', 'color': '#f59e0b'},
-      {'name': 'Utilities', 'color': '#10b981'},
-      {'name': 'Office Supplies', 'color': '#6366f1'},
-      {'name': 'Software', 'color': '#8b5cf6'},
-      {'name': 'Marketing', 'color': '#ec4899'},
-      {'name': 'Travel', 'color': '#14b8a6'},
-      {'name': 'Professional Services', 'color': '#64748b'},
-    ];
-
-    setState(() {
-      _expenseCategories = defaultCategories;
-      for (var category in defaultCategories) {
-        _categoryColors[category['name']!] = _parseColor(category['color']!);
-      }
-    });
   }
 
   Future<void> _loadMonthlyTrend() async {
@@ -274,15 +365,19 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         final monthKey = DateFormat('MMM yyyy').format(date);
         monthlyTotals[monthKey] =
             (monthlyTotals[monthKey] ?? 0) +
-            (expense['amount'] as num).toDouble();
+                ((expense['amount'] as num?)?.toDouble() ?? 0);
       }
 
       // Convert to list and sort
       final sortedMonths = monthlyTotals.entries.toList()
         ..sort((a, b) {
-          final dateA = DateFormat('MMM yyyy').parse(a.key);
-          final dateB = DateFormat('MMM yyyy').parse(b.key);
-          return dateA.compareTo(dateB);
+          try {
+            final dateA = DateFormat('MMM yyyy').parse(a.key);
+            final dateB = DateFormat('MMM yyyy').parse(b.key);
+            return dateA.compareTo(dateB);
+          } catch (e) {
+            return 0;
+          }
         });
 
       setState(() {
@@ -292,17 +387,65 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       });
     } catch (e) {
       print('Error loading monthly trend: $e');
-      // Use sample data if database fails
+      // Keep existing data or set empty
       setState(() {
-        _monthlyTrend = [
-          {'month': 'Sep 2025', 'expenses': 125000.00},
-          {'month': 'Oct 2025', 'expenses': 142000.00},
-          {'month': 'Nov 2025', 'expenses': 138000.00},
-          {'month': 'Dec 2025', 'expenses': 158000.00},
-          {'month': 'Jan 2026', 'expenses': 160500.00},
-          {'month': 'Feb 2026', 'expenses': 145000.00},
-        ];
+        _monthlyTrend = [];
       });
+    }
+  }
+
+  Future<void> _updateBalanceSummary() async {
+    try {
+      final supabase = Supabase.instance.client;
+
+      // Calculate totals
+      final totalExpenses = _allExpenses.fold<double>(
+          0.0,
+              (sum, e) => sum + (e['amount'] as double)
+      );
+
+      // Get total earnings from invoices (you need to implement this based on your needs)
+      final earningsResponse = await supabase
+          .from('invoices')
+          .select('amount')
+          .eq('status', 'Paid');
+
+      final totalEarnings = earningsResponse.fold<double>(
+          0.0,
+              (sum, inv) => sum + ((inv['amount'] as num?)?.toDouble() ?? 0)
+      );
+
+      final currentBalance = totalEarnings - totalExpenses;
+
+      // Update or insert balance summary
+      final existingBalance = await supabase
+          .from('balance_summary')
+          .select()
+          .maybeSingle();
+
+      if (existingBalance == null) {
+        await supabase.from('balance_summary').insert({
+          'total_earnings': totalEarnings,
+          'total_expenses': totalExpenses,
+          'current_balance': currentBalance,
+          'last_calculated_at': DateTime.now().toIso8601String(),
+          'balance_start_date': DateTime.now().subtract(const Duration(days: 365)).toIso8601String(),
+        });
+      } else {
+        await supabase
+            .from('balance_summary')
+            .update({
+          'total_earnings': totalEarnings,
+          'total_expenses': totalExpenses,
+          'current_balance': currentBalance,
+          'last_calculated_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+            .eq('id', existingBalance['id']);
+      }
+    } catch (e) {
+      print('Error updating balance summary: $e');
+      // Non-critical error, don't throw
     }
   }
 
@@ -314,11 +457,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     final currentYear = now.year;
 
     for (var expense in _allExpenses) {
-      total += expense['amount'];
+      total += expense['amount'] as double;
 
       final date = expense['date'] as DateTime;
       if (date.month == currentMonth && date.year == currentYear) {
-        monthTotal += expense['amount'];
+        monthTotal += expense['amount'] as double;
       }
     }
 
@@ -349,8 +492,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
     return _allExpenses.where((exp) {
       return exp['description'].toString().toLowerCase().contains(
-            _searchQuery.toLowerCase(),
-          ) ||
+        _searchQuery.toLowerCase(),
+      ) ||
           exp['category'].toString().toLowerCase().contains(
             _searchQuery.toLowerCase(),
           ) ||
@@ -364,9 +507,16 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   }
 
   List<Map<String, dynamic>> get paginatedExpenses {
+    if (filteredExpenses.isEmpty) return [];
+
     final start = (_currentPage - 1) * _itemsPerPage;
     final end = start + _itemsPerPage;
-    if (filteredExpenses.isEmpty) return [];
+
+    if (start >= filteredExpenses.length) {
+      _currentPage = 1;
+      return filteredExpenses.sublist(0, end > filteredExpenses.length ? filteredExpenses.length : end);
+    }
+
     return filteredExpenses.sublist(
       start,
       end > filteredExpenses.length ? filteredExpenses.length : end,
@@ -378,7 +528,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   Map<String, double> get categoryTotals {
     final totals = <String, double>{};
     for (var exp in _allExpenses) {
-      totals[exp['category']] = (totals[exp['category']] ?? 0) + exp['amount'];
+      final category = exp['category'] as String;
+      totals[category] = (totals[category] ?? 0) + (exp['amount'] as double);
     }
     return totals;
   }
@@ -402,14 +553,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   void _clearAllFilters() {
     setState(() {
       _searchController.clear();
+      _searchQuery = '';
       _selectedCategory = 'All';
       _selectedPaymentMethod = 'All';
       _showBusinessOnly = false;
-      final now = DateTime.now();
-      _selectedDateRange = DateTimeRange(
-        start: DateTime(now.year, now.month - 6, now.day),
-        end: now,
-      );
+      _selectedDateRange = null;
       _currentPage = 1;
     });
     _loadExpenses();
@@ -419,15 +567,13 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     try {
       final supabase = Supabase.instance.client;
 
-      // Find category ID
+      // Find category ID from the map
       String? categoryId;
       if (expenseData['category'] != null) {
-        final category = _expenseCategories.firstWhere(
-          (cat) => cat['name'] == expenseData['category'],
-          orElse: () => {},
-        );
-        if (category.isNotEmpty) {
-          categoryId = category['id'];
+        categoryId = _categoryIdMap[expenseData['category']];
+        // If it's a temp ID, don't use it in DB
+        if (categoryId != null && categoryId.startsWith('temp-')) {
+          categoryId = null;
         }
       }
 
@@ -435,7 +581,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         'amount': expenseData['amount'],
         'description': expenseData['description'],
         'category_id': categoryId,
-        'category_name': expenseData['category'],
+        'category_name': expenseData['category'], // Keep as fallback
         'date_incurred': (expenseData['date'] as DateTime).toIso8601String(),
         'payment_method': expenseData['paymentMethod']?.toLowerCase() ?? 'cash',
         'vendor_name': expenseData['vendor'],
@@ -444,6 +590,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         'notes': expenseData['notes'],
         'receipt_number': expenseData['receiptNumber'],
         'tags': expenseData['tags'] ?? [],
+        // 'user_id': _userId, // Uncomment if your expenses table has user_id
       };
 
       await supabase.from('expenses').insert(expense);
@@ -452,6 +599,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       await _loadMonthlyTrend();
       _calculateStats();
       _updateSearchSummary();
+      _updateBalanceSummary();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -462,10 +610,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         );
       }
     } catch (e) {
+      print('Error adding expense: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Error adding expense: $e"),
+            content: Text("Error adding expense: ${e.toString()}"),
             backgroundColor: Colors.red,
           ),
         );
@@ -474,21 +623,19 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   }
 
   Future<void> _updateExpense(
-    String id,
-    Map<String, dynamic> expenseData,
-  ) async {
+      String id,
+      Map<String, dynamic> expenseData,
+      ) async {
     try {
       final supabase = Supabase.instance.client;
 
       // Find category ID
       String? categoryId;
       if (expenseData['category'] != null) {
-        final category = _expenseCategories.firstWhere(
-          (cat) => cat['name'] == expenseData['category'],
-          orElse: () => {},
-        );
-        if (category.isNotEmpty) {
-          categoryId = category['id'];
+        categoryId = _categoryIdMap[expenseData['category']];
+        // If it's a temp ID, don't use it in DB
+        if (categoryId != null && categoryId.startsWith('temp-')) {
+          categoryId = null;
         }
       }
 
@@ -512,6 +659,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       await _loadMonthlyTrend();
       _calculateStats();
       _updateSearchSummary();
+      _updateBalanceSummary();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -522,10 +670,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         );
       }
     } catch (e) {
+      print('Error updating expense: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("Error updating expense: $e"),
+            content: Text("Error updating expense: ${e.toString()}"),
             backgroundColor: Colors.red,
           ),
         );
@@ -579,6 +728,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       await _loadMonthlyTrend();
       _calculateStats();
       _updateSearchSummary();
+      _updateBalanceSummary();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -589,16 +739,21 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         );
       }
     } catch (e) {
+      print('Error deleting expense: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error deleting expense: $e'),
+            content: Text('Error deleting expense: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
+
+  // All the UI building methods remain exactly the same as in your original code
+  // I'm not including them here to keep the response manageable
+  // Just copy all the build methods from your original code exactly as they were
 
   @override
   Widget build(BuildContext context) {
@@ -646,10 +801,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                 Expanded(
                   child: _isLoading
                       ? const Center(
-                          child: CircularProgressIndicator(
-                            color: Color(0xFF5B8CFF),
-                          ),
-                        )
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF5B8CFF),
+                    ),
+                  )
                       : _errorMessage != null
                       ? _buildErrorState()
                       : _buildContent(),
@@ -660,6 +815,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: "expenseFAB",
         onPressed: _openAddExpenseModal,
         backgroundColor: const Color(0xFF5B8CFF),
         child: const Icon(Icons.add, color: Colors.white),
@@ -774,73 +930,109 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withOpacity(0.15)),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.03)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Date Range",
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                InkWell(
-                  onTap: _selectDateRange,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.2)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.calendar_today,
-                          size: 18,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            _selectedDateRange != null
-                                ? "${DateFormat('dd MMM yyyy').format(_selectedDateRange!.start)} - ${DateFormat('dd MMM yyyy').format(_selectedDateRange!.end)}"
-                                : "Select date range",
-                            style: TextStyle(
-                              color: _selectedDateRange != null
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.5),
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                        Icon(
-                          Icons.arrow_drop_down,
-                          color: Colors.white.withOpacity(0.7),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "Date Range",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
+            const SizedBox(height: 12),
+
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildPreset("All Time", null),
+                _buildPreset("Last 7 Days",
+                    DateTimeRange(
+                      start: DateTime.now().subtract(const Duration(days: 7)),
+                      end: DateTime.now(),
+                    )),
+                _buildPreset("Last Month",
+                    DateTimeRange(
+                      start: DateTime.now().subtract(const Duration(days: 30)),
+                      end: DateTime.now(),
+                    )),
+                _buildPreset("Last 3 Months",
+                    DateTimeRange(
+                      start: DateTime.now().subtract(const Duration(days: 90)),
+                      end: DateTime.now(),
+                    )),
+                _buildPreset("Last Year",
+                    DateTimeRange(
+                      start: DateTime.now().subtract(const Duration(days: 365)),
+                      end: DateTime.now(),
+                    )),
+                _buildCustomDate(),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreset(String label, DateTimeRange? range) {
+    bool active = _selectedDateRange == range ||
+        (range == null && _selectedDateRange == null);
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedDateRange = range;
+          _currentPage = 1;
+        });
+        _loadExpenses();
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: active
+              ? const Color(0xFF5B8CFF).withOpacity(0.4)
+              : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: active
+                ? const Color(0xFF5B8CFF)
+                : Colors.white.withOpacity(0.2),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? Colors.white : Colors.white70,
+            fontSize: 12,
           ),
         ),
       ),
     );
   }
+
+  Widget _buildCustomDate() {
+    return GestureDetector(
+      onTap: _selectDateRange,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.white.withOpacity(0.2)),
+        ),
+        child: const Text(
+          "Custom",
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      ),
+    );
+  }
+
 
   Future<void> _selectDateRange() async {
     final DateTimeRange? picked = await showDateRangePicker(
@@ -863,12 +1055,21 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       },
     );
 
+    if (!mounted) return;
+
     if (picked != null) {
       setState(() {
-        _selectedDateRange = picked;
+        if (_selectedDateRange != null &&
+            _selectedDateRange!.start == picked.start &&
+            _selectedDateRange!.end == picked.end) {
+          _selectedDateRange = null;
+        } else {
+          _selectedDateRange = picked;
+        }
         _currentPage = 1;
       });
-      _loadExpenses();
+
+      await _loadExpenses();
     }
   }
 
@@ -1339,7 +1540,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                 height: 6,
                                 decoration: BoxDecoration(
                                   color:
-                                      _categoryColors[entry.key] ?? Colors.grey,
+                                  _categoryColors[entry.key] ?? Colors.grey,
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                               ),
@@ -1676,15 +1877,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               ),
                               suffixIcon: _searchQuery.isNotEmpty
                                   ? IconButton(
-                                      icon: Icon(
-                                        Icons.clear,
-                                        size: 18,
-                                        color: Colors.white.withOpacity(0.6),
-                                      ),
-                                      onPressed: () {
-                                        _searchController.clear();
-                                      },
-                                    )
+                                icon: Icon(
+                                  Icons.clear,
+                                  size: 18,
+                                  color: Colors.white.withOpacity(0.6),
+                                ),
+                                onPressed: () {
+                                  _searchController.clear();
+                                },
+                              )
                                   : null,
                               border: InputBorder.none,
                               contentPadding: const EdgeInsets.symmetric(
@@ -1761,18 +1962,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                             margin: const EdgeInsets.only(right: 6),
                             child: _buildActiveFilterChip(
                               label:
-                                  "${DateFormat('dd/MM').format(_selectedDateRange!.start)} - ${DateFormat('dd/MM').format(_selectedDateRange!.end)}",
+                              "${DateFormat('dd/MM').format(_selectedDateRange!.start)} - ${DateFormat('dd/MM').format(_selectedDateRange!.end)}",
                               onRemove: () {
                                 setState(() {
-                                  final now = DateTime.now();
-                                  _selectedDateRange = DateTimeRange(
-                                    start: DateTime(
-                                      now.year,
-                                      now.month - 6,
-                                      now.day,
-                                    ),
-                                    end: now,
-                                  );
+                                  _selectedDateRange = null;
                                   _currentPage = 1;
                                 });
                                 _loadExpenses();
@@ -2232,15 +2425,18 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.white.withOpacity(0.2)),
               ),
-              child: const Row(
-                children: [
-                  Icon(Icons.download, size: 14, color: Colors.white70),
-                  SizedBox(width: 4),
-                  Text(
-                    "Export",
-                    style: TextStyle(fontSize: 12, color: Colors.white),
-                  ),
-                ],
+              child: InkWell(
+                onTap: _showExportOptions,
+                child: const Row(
+                  children: [
+                    Icon(Icons.download, size: 14, color: Colors.white70),
+                    SizedBox(width: 4),
+                    Text(
+                      "Export",
+                      style: TextStyle(fontSize: 12, color: Colors.white),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 8),
@@ -2345,7 +2541,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           height: 8,
                           decoration: BoxDecoration(
                             color:
-                                _categoryColors[expense['category']] ??
+                            _categoryColors[expense['category']] ??
                                 Colors.grey,
                             shape: BoxShape.circle,
                           ),
@@ -2405,10 +2601,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         IconButton(
           onPressed: _currentPage > 1
               ? () {
-                  setState(() {
-                    _currentPage--;
-                  });
-                }
+            setState(() {
+              _currentPage--;
+            });
+          }
               : null,
           icon: Icon(
             Icons.chevron_left,
@@ -2437,10 +2633,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         IconButton(
           onPressed: _currentPage < totalPages
               ? () {
-                  setState(() {
-                    _currentPage++;
-                  });
-                }
+            setState(() {
+              _currentPage++;
+            });
+          }
               : null,
           icon: Icon(
             Icons.chevron_right,
@@ -2477,7 +2673,19 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       text: isEditing ? existingExpense['notes'] : '',
     );
 
+    // Get unique category names
+    final uniqueCategoryNames = _expenseCategories
+        .map((e) => e['name'] as String)
+        .toSet()
+        .toList();
+
     String? selectedCategory = isEditing ? existingExpense['category'] : null;
+
+    // Verify the selected category exists in unique list
+    if (selectedCategory != null && !uniqueCategoryNames.contains(selectedCategory)) {
+      selectedCategory = null;
+    }
+
     String? selectedPayment = isEditing
         ? existingExpense['paymentMethod']
         : null;
@@ -2619,13 +2827,36 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                 child: _buildModalDropdown(
                                   hint: "Select Category",
                                   value: selectedCategory,
-                                  items: _expenseCategories
-                                      .map((e) => e['name'] as String)
-                                      .toList(),
-                                  onChanged: (val) {
-                                    setModalState(() {
-                                      selectedCategory = val;
-                                    });
+                                  items: [
+                                    ...uniqueCategoryNames,
+                                    "+ Create Category"
+                                  ],
+                                  onChanged: (val) async {
+
+                                    if (val == "+ Create Category") {
+
+                                      final newCategory = await _showCreateCategoryDialog();
+
+                                      if (newCategory != null && newCategory.isNotEmpty) {
+
+                                        final createdName = await _createCategory(newCategory);
+
+                                        if (createdName != null) {
+
+                                          setModalState(() {
+                                            selectedCategory = createdName;
+                                          });
+
+                                        }
+                                      }
+
+                                    } else {
+
+                                      setModalState(() {
+                                        selectedCategory = val;
+                                      });
+
+                                    }
                                   },
                                 ),
                               ),
@@ -2756,17 +2987,30 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                                       return;
                                     }
 
+                                    final amount = double.tryParse(
+                                      amountController.text,
+                                    );
+                                    if (amount == null || amount <= 0) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            "Please enter a valid amount",
+                                          ),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                      return;
+                                    }
+
                                     final expenseData = {
                                       'date': selectedDate,
-                                      'amount':
-                                          double.tryParse(
-                                            amountController.text,
-                                          ) ??
-                                          0,
+                                      'amount': amount,
                                       'description': descriptionController.text,
                                       'category': selectedCategory,
                                       'paymentMethod':
-                                          selectedPayment ?? 'Cash',
+                                      selectedPayment ?? 'Cash',
                                       'vendor': vendorController.text,
                                       'notes': notesController.text,
                                       'business': isBusiness,
@@ -2858,6 +3102,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     required String? value,
     required ValueChanged<String?> onChanged,
   }) {
+    // Remove duplicates from items list
+    final uniqueItems = items.toSet().toList();
+
+    // Ensure the current value exists in the unique items list
+    String? currentValue = value;
+    if (currentValue != null && !uniqueItems.contains(currentValue)) {
+      currentValue = null;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
@@ -2867,7 +3120,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: value,
+          value: currentValue,
           hint: Text(
             hint,
             style: TextStyle(
@@ -2883,10 +3136,17 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             color: Colors.white.withOpacity(0.6),
             size: 24,
           ),
-          items: items.map((e) {
-            return DropdownMenuItem(value: e, child: Text(e));
+          items: uniqueItems.map((e) {
+            return DropdownMenuItem<String>(
+              value: e,
+              child: Text(e),
+            );
           }).toList(),
-          onChanged: onChanged,
+          onChanged: (newValue) {
+            if (newValue != null) {
+              onChanged(newValue);
+            }
+          },
         ),
       ),
     );
@@ -2994,5 +3254,215 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         ),
       ),
     );
+  }
+
+  void _showExportOptions() {
+    final List<Map<String, dynamic>> data =
+    hasActiveFilters ? filteredExpenses : _allExpenses;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: const Text(
+            "Export Expenses",
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Total Records: ${data.length}",
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 10),
+
+              if (hasActiveFilters) ...[
+                const Text(
+                  "Applied Filters:",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 6),
+
+                if (_selectedDateRange != null)
+                  Text(
+                    "Date: ${DateFormat('dd MMM yyyy').format(_selectedDateRange!.start)} - ${DateFormat('dd MMM yyyy').format(_selectedDateRange!.end)}",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+
+                if (_selectedCategory != 'All')
+                  Text(
+                    "Category: $_selectedCategory",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+
+                if (_selectedPaymentMethod != 'All')
+                  Text(
+                    "Payment: $_selectedPaymentMethod",
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+
+                if (_showBusinessOnly)
+                  const Text(
+                    "Type: Business Only",
+                    style: TextStyle(color: Colors.white70),
+                  ),
+
+                const SizedBox(height: 10),
+              ] else
+                const Text(
+                  "Exporting ALL expenses",
+                  style: TextStyle(color: Colors.white70),
+                ),
+
+              const SizedBox(height: 20),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _exportExcel();
+                      },
+                      icon: const Icon(Icons.table_chart),
+                      label: const Text("Excel"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF22C55E),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _exportPDF();
+                      },
+                      icon: const Icon(Icons.picture_as_pdf),
+                      label: const Text("PDF"),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFEF4444),
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _exportExcel() async {
+    final excel = Excel.createExcel();
+    final sheet = excel['Expenses'];
+
+    List<Map<String, dynamic>> data =
+    hasActiveFilters ? filteredExpenses : _allExpenses;
+
+    sheet.appendRow([
+      "Date",
+      "Description",
+      "Category",
+      "Amount",
+      "Payment",
+      "Vendor"
+    ]);
+
+    for (var exp in data) {
+      sheet.appendRow([
+        exp['formattedDate'],
+        exp['description'],
+        exp['category'],
+        exp['amount'],
+        exp['paymentMethod'],
+        exp['vendor']
+      ]);
+    }
+
+    Directory? directory;
+
+    if (Platform.isAndroid) {
+      directory = Directory("/storage/emulated/0/Download");
+    } else {
+      directory = await getApplicationDocumentsDirectory();
+    }
+
+    final file = File("${directory.path}/expenses.xlsx");
+    await file.writeAsBytes(excel.encode()!);
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Excel saved to ${file.path}")),
+      );
+    }
+  }
+
+  Future<void> _exportPDF() async {
+    final pdf = pw.Document();
+
+    List<Map<String, dynamic>> data =
+    hasActiveFilters ? filteredExpenses : _allExpenses;
+
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) {
+          return pw.Column(
+            children: [
+              pw.Text("Expense Report", style: pw.TextStyle(fontSize: 24)),
+              pw.SizedBox(height: 20),
+              pw.Table.fromTextArray(
+                headers: [
+                  "Date",
+                  "Description",
+                  "Category",
+                  "Amount",
+                  "Payment"
+                ],
+                data: data.map((exp) {
+                  return [
+                    exp['formattedDate'],
+                    exp['description'],
+                    exp['category'],
+                    exp['amount'].toString(),
+                    exp['paymentMethod']
+                  ];
+                }).toList(),
+              )
+            ],
+          );
+        },
+      ),
+    );
+
+    Directory? directory;
+
+    if (Platform.isAndroid) {
+      directory = Directory("/storage/emulated/0/Download");
+    } else {
+      directory = await getApplicationDocumentsDirectory();
+    }
+
+    final file = File("${directory.path}/expenses.pdf");
+
+    await file.writeAsBytes(await pdf.save());
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("PDF saved to ${file.path}")),
+      );
+    }
   }
 }

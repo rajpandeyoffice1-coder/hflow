@@ -29,7 +29,11 @@ class SupabaseService {
   Future<List<Map<String, dynamic>>> getInvestments() async {
     final response = await _client
         .from('investments')
-        .select()
+        .select('''
+        *,
+        investment_categories(name,icon,color),
+        investment_sub_categories(name)
+      ''')
         .eq('user_id', userId)
         .order('date', ascending: false);
 
@@ -46,6 +50,7 @@ class SupabaseService {
       'comments': investment.comments,
       'payment_method': investment.paymentMethod,
       'owner': investment.owner,
+      'goal_id': investment.goalId,
     });
   }
 
@@ -55,13 +60,12 @@ class SupabaseService {
         .update({
           'date': investment.date,
           'amount': investment.amount,
-          'category': investment.category,
-          'sub_category': investment.subCategory,
           'owner': investment.owner,
           'payment_method': investment.paymentMethod,
           'comments': investment.comments,
           'category_id': investment.categoryId,
           'sub_category_id': investment.subCategoryId,
+          'goal_id': investment.goalId,
         })
         .eq('id', int.parse(investment.id));
   }
@@ -105,6 +109,18 @@ class SupabaseService {
     return response;
   }
 
+  Future<void> addFinancialGoal(FinancialGoal goal) async {
+    await _client.from('financial_goals').insert({
+      'user_id': userId,
+      'name': goal.name,
+      'target_amount': goal.targetAmount,
+      'current_amount': goal.currentAmount,
+      'deadline': goal.deadline?.toIso8601String(),
+      'icon': goal.icon,
+      'color': goal.color,
+    });
+  }
+
   Future<List<Redemption>> getAllRedemptions() async {
     final response = await _client
         .from('investment_redemptions') // ✅ correct table
@@ -113,4 +129,5 @@ class SupabaseService {
 
     return (response as List).map((json) => Redemption.fromJson(json)).toList();
   }
+
 }

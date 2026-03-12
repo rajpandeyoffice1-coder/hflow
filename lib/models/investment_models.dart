@@ -12,6 +12,7 @@ class Investment {
   List<Redemption> redemptions;
   final int? categoryId;
   final int? subCategoryId;
+  final String? goalId;
 
   Investment({
     required this.id,
@@ -26,6 +27,7 @@ class Investment {
     List<Redemption>? redemptions,
     this.categoryId,
     this.subCategoryId,
+    this.goalId,
   }) : redemptions = redemptions ?? [];
 
   double get currentValue {
@@ -38,14 +40,18 @@ class Investment {
   }
 
   double _getGrowthFactor() {
-    if (category.contains('Mutual Fund')) return 1.12;
-    if (category.contains('Stock')) return 1.08;
-    if (category.contains('Fixed Deposit') || category.contains('FD')) return 1.05;
-    if (category.contains('Gold')) return 1.10;
-    if (category.contains('Real Estate')) return 1.15;
-    if (category.contains('Crypto')) return 1.20;
+    final cat = category.toLowerCase();
+
+    if (cat.contains('mutual')) return 1.12;
+    if (cat.contains('stock')) return 1.08;
+    if (cat.contains('fixed')) return 1.05;
+    if (cat.contains('gold')) return 1.10;
+    if (cat.contains('real')) return 1.15;
+    if (cat.contains('crypto')) return 1.20;
+
     return 1.06;
   }
+
 
   Map<String, dynamic> toJson() {
     return {
@@ -60,6 +66,7 @@ class Investment {
       'redeemed_amount': redeemedAmount,
       'category_id': categoryId,
       'sub_category_id': subCategoryId,
+      'goal_id': goalId,
     };
   }
 
@@ -67,8 +74,8 @@ class Investment {
     return Investment(
       id: json['id']?.toString() ?? '',
       date: json['date'] ?? '',
-      category: json['category'] ?? '',
-      subCategory: json['sub_category'],
+      category: json['category_name'] ?? '', // change
+      subCategory: json['sub_category_name'],
       amount: (json['amount'] ?? 0).toDouble(),
       owner: json['owner'] ?? 'Hari',
       paymentMethod: json['payment_method'] ?? '',
@@ -76,6 +83,7 @@ class Investment {
       redeemedAmount: (json['redeemed_amount'] ?? 0).toDouble(),
       categoryId: json['category_id'],
       subCategoryId: json['sub_category_id'],
+      goalId: json['goal_id']?.toString(),
     );
   }
 }

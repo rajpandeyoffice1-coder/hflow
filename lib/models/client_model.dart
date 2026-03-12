@@ -106,34 +106,40 @@ class ClientModel {
     
     if (json['invoices'] != null && json['invoices'] is List) {
       invoices = List<Map<String, dynamic>>.from(json['invoices']);
-      
+
       for (var invoice in invoices) {
-        double amount = (invoice['amount'] as num?)?.toDouble() ?? 0;
+
+        double amount = double.tryParse(invoice['amount'].toString()) ?? 0;
         totalAmount += amount;
-        
+
         String status = invoice['status']?.toString().toLowerCase() ?? '';
+
         DateTime? invoiceDate;
-        
+
         if (invoice['date_issued'] != null) {
           try {
             invoiceDate = DateTime.parse(invoice['date_issued'].toString());
-            if (lastInvoiceDate == null || 
-                (invoiceDate.isAfter(lastInvoiceDate))) {
+
+            if (lastInvoiceDate == null || invoiceDate.isAfter(lastInvoiceDate)) {
               lastInvoiceDate = invoiceDate;
             }
-          } catch (e) {}
+
+          } catch (_) {}
         }
-        
+
         if (status == 'paid') {
           paidAmount += amount;
           paidInvoices++;
-          if (invoiceDate != null && 
+
+          if (invoiceDate != null &&
               (lastPaymentDate == null || invoiceDate.isAfter(lastPaymentDate))) {
             lastPaymentDate = invoiceDate;
           }
+
         } else if (status == 'pending') {
           pendingAmount += amount;
           pendingInvoices++;
+
         } else if (status == 'overdue') {
           overdueAmount += amount;
           overdueInvoices++;
@@ -157,10 +163,8 @@ class ClientModel {
       updatedAt: json['updated_at'] != null 
           ? DateTime.tryParse(json['updated_at'].toString())
           : null,
-      totalInvoices: json['total_invoices'] ?? invoices.length,
-      totalAmount: json['total_amount'] != null 
-          ? (json['total_amount'] as num).toDouble() 
-          : totalAmount,
+      totalInvoices: invoices.length,
+      totalAmount: totalAmount,
       paidAmount: paidAmount,
       pendingAmount: pendingAmount,
       overdueAmount: overdueAmount,

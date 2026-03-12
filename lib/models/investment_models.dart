@@ -74,15 +74,24 @@ class Investment {
     return Investment(
       id: json['id']?.toString() ?? '',
       date: json['date'] ?? '',
-      category: json['category_name'] ?? '', // change
-      subCategory: json['sub_category_name'],
+
       amount: (json['amount'] ?? 0).toDouble(),
+
+      categoryId: json['category_id'],
+      subCategoryId: json['sub_category_id'],
+
+      /// CATEGORY FROM JOIN
+      category: json['investment_categories']?['name'] ?? 'Unknown',
+
+      /// SUBCATEGORY FROM JOIN
+      subCategory: json['investment_sub_categories']?['name'],
+
       owner: json['owner'] ?? 'Hari',
       paymentMethod: json['payment_method'] ?? '',
       comments: json['comments'] ?? '',
+
       redeemedAmount: (json['redeemed_amount'] ?? 0).toDouble(),
-      categoryId: json['category_id'],
-      subCategoryId: json['sub_category_id'],
+
       goalId: json['goal_id']?.toString(),
     );
   }

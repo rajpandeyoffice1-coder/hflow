@@ -45,6 +45,7 @@ class InvestmentProvider extends ChangeNotifier {
     }
   }
 
+
   Future<void> refreshData() async {
     _isRefreshing = true;
     notifyListeners();
@@ -205,13 +206,20 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   Future<void> addInvestment(Investment investment) async {
+
     try {
+
       await _supabaseService.addInvestment(investment);
+
       await loadInvestments();
+
+      notifyListeners();
+
     } catch (e) {
       debugPrint('Error adding investment: $e');
       rethrow;
     }
+
   }
 
   Future<void> updateInvestment(Investment investment) async {
@@ -444,5 +452,6 @@ class InvestmentProvider extends ChangeNotifier {
 
     return totals;
   }
+
 
 }

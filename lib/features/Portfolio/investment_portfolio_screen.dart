@@ -37,6 +37,9 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   
   // View mode: 'cards', 'table', 'calendar'
   String _currentView = 'cards';
+
+  String _heatmapRange = "3m";
+  DateTimeRange? _customRange;
   
   // Calendar state
   DateTime _calendarCurrentMonth = DateTime.now();
@@ -44,14 +47,15 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   // Selected investments for bulk actions
   final Set<String> _selectedInvestmentIds = {};
 
-
   @override
   void initState() {
     super.initState();
+
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_handleTabChange);
-    _provider = Provider.of<InvestmentProvider>(context, listen: false);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _provider = context.read<InvestmentProvider>();
       _loadData();
     });
   }
@@ -105,7 +109,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               ],
             ),
           ),
-          if (_provider.isRefreshing)
+          if (context.watch<InvestmentProvider>().isRefreshing)
             _buildRefreshingIndicator(),
         ],
       ),
@@ -119,6 +123,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   Widget _buildHeader() {
+    final provider = Provider.of<InvestmentProvider>(context);
+
     return Container(
       height: 56,
       decoration: BoxDecoration(
@@ -153,17 +159,19 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               ),
             ),
           ),
+
           IconButton(
             icon: Icon(
               Icons.refresh,
-              color: _provider.isRefreshing 
-                  ? const Color(0xFF5B8CFF) 
+              color: provider.isRefreshing
+                  ? const Color(0xFF5B8CFF)
                   : Colors.white,
             ),
-            onPressed: _provider.isRefreshing 
-                ? null 
-                : () => _provider.refreshData(),
+            onPressed: provider.isRefreshing
+                ? null
+                : () => provider.refreshData(),
           ),
+
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onPressed: _showMoreOptions,
@@ -172,6 +180,8 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       ),
     );
   }
+
+
 
   Widget _buildOwnerSelector() {
     double hariTotal = _provider.getTotalByOwner('Hari');
@@ -460,25 +470,87 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                   fontWeight: FontWeight.w600,
                 ),
               ),
+
               const Spacer(),
-              Text(
-                'Last 12 Months',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.6),
-                  fontSize: 12,
+
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: DropdownButton<String>(
+                  value: _heatmapRange,
+                  dropdownColor: const Color(0xFF1A1F2E),
+                  underline: const SizedBox(),
+                  icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+                  items: const [
+
+                    DropdownMenuItem(
+                      value: "3m",
+                      child: Text("3 Months", style: TextStyle(color: Colors.white)),
+                    ),
+
+                    DropdownMenuItem(
+                      value: "6m",
+                      child: Text("6 Months", style: TextStyle(color: Colors.white)),
+                    ),
+
+                    DropdownMenuItem(
+                      value: "12m",
+                      child: Text("12 Months", style: TextStyle(color: Colors.white)),
+                    ),
+
+                    DropdownMenuItem(
+                      value: "custom",
+                      child: Text("Custom", style: TextStyle(color: Colors.white)),
+                    ),
+
+                  ],
+                  onChanged: (value) async {
+
+                    if (value == "custom") {
+
+                      final range = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                      );
+
+                      if (range != null) {
+                        setState(() {
+                          _customRange = range;
+                          _heatmapRange = value!;
+                        });
+                      }
+
+                    } else {
+                      setState(() {
+                        _heatmapRange = value!;
+                      });
+                    }
+                  },
                 ),
               ),
             ],
           ),
+
           const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: SizedBox(
-              width: 700,
-              child: _buildHeatmapGrid(provider),
-            ),
+
+          LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: constraints.maxWidth,
+                  child: _buildHeatmapGrid(provider),
+                ),
+              );
+            },
           ),
+
           const SizedBox(height: 12),
+
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -487,10 +559,10 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                 style: TextStyle(color: Colors.white54, fontSize: 11),
               ),
               const SizedBox(width: 6),
-              _buildHeatmapLegendItem(0.05),
-              _buildHeatmapLegendItem(0.2),
+              _buildHeatmapLegendItem(0.1),
+              _buildHeatmapLegendItem(0.3),
               _buildHeatmapLegendItem(0.5),
-              _buildHeatmapLegendItem(0.8),
+              _buildHeatmapLegendItem(0.7),
               _buildHeatmapLegendItem(1.0),
               const SizedBox(width: 6),
               const Text(
@@ -505,28 +577,36 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   Widget _buildHeatmapGrid(InvestmentProvider provider) {
+
     final heatmapData = provider.getHeatmapData();
     final now = DateTime.now();
-    final startDate = DateTime(now.year - 1, now.month, now.day);
-    
+    final startDate = now.subtract(const Duration(days: 365));
+
     List<Widget> weeks = [];
+
     for (int week = 0; week < 52; week++) {
+
       List<Widget> days = [];
+
       for (int day = 0; day < 7; day++) {
+
         final date = startDate.add(Duration(days: week * 7 + day));
-        if (date.isAfter(now)) continue;
-        
-        final amount = heatmapData[DateFormat('yyyy-MM-dd').format(date)] ?? 0;
-        final intensity = amount > 0 ? (amount / 100000).clamp(0.1, 1.0) : 0.05;
-        
+
+        final amount =
+            heatmapData[DateFormat('yyyy-MM-dd').format(date)] ?? 0;
+
+        double intensity = 0;
+
+        if (amount > 0) {
+          intensity = (amount / 100000).clamp(0.1, 1.0);
+        }
+
         days.add(
           GestureDetector(
-            onTap: () {
-              _showDayDetails(date, amount);
-            },
+            onTap: () => _showDayDetails(date, amount),
             child: Container(
-              width: 14,
-              height: 14,
+              width: 12,
+              height: 12,
               margin: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: Color.lerp(
@@ -534,23 +614,19 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                   const Color(0xFF5B8CFF),
                   intensity,
                 ),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
           ),
         );
       }
-      weeks.add(
-        Column(
-          children: days,
-        ),
-      );
+
+      weeks.add(Column(children: days));
     }
-    
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: weeks,
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: weeks),
     );
   }
 
@@ -2717,11 +2793,29 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
         categories: _provider.categories,
         goals: _provider.financialGoals,
         onSave: (investment) async {
-          await _provider.addInvestment(investment);
-          if (mounted) {
-            Navigator.pop(context);
-            _showSnackBar('Investment added successfully', isSuccess: true);
+
+          try {
+
+            await _provider.addInvestment(investment);
+
+            if (mounted) {
+              Navigator.pop(context);
+
+              _showSnackBar(
+                "Investment saved successfully",
+                isSuccess: true,
+              );
+            }
+
+          } catch (e) {
+
+            _showSnackBar(
+              "Error saving investment",
+              isSuccess: false,
+            );
+
           }
+
         },
       ),
     );

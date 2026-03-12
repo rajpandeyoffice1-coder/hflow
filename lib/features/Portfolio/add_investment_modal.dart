@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/investment_models.dart';
+import 'inv_supabase_service.dart';
 
 class AddInvestmentModal extends StatefulWidget {
   final Investment? investment;
@@ -35,6 +36,8 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
   String _selectedPaymentMethod = '';
   int? _selectedCategoryId;
   String? _selectedGoalId;
+
+  final SupabaseService _supabaseService = SupabaseService();
 
   @override
   void initState() {
@@ -256,10 +259,9 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
   }
 
   Widget _buildCategoryRow() {
-    final categoryNames = widget.categories
-    .map((c) => c.name.trim())
-    .toSet()
-    .toList();
+    final categoryNames =
+    widget.categories.map((c) => c.name.trim()).toSet().toList();
+
     return Row(
       children: [
         Expanded(
@@ -291,23 +293,38 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
                   dropdownColor: const Color(0xFF1A1F2E),
                   underline: const SizedBox(),
                   icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-                  items: categoryNames.map((name) {
-                    final cat = widget.categories.firstWhere(
-                      (c) => c.name.trim() == name,
-                    );
+                  items: [
+                    ...categoryNames.map((name) {
+                      final cat = widget.categories.firstWhere(
+                            (c) => c.name.trim() == name,
+                      );
 
-                    return DropdownMenuItem(
-                      value: name,
+                      return DropdownMenuItem(
+                        value: name,
+                        child: Text(
+                          '${cat.icon} $name',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      );
+                    }),
+
+                    const DropdownMenuItem(
+                      value: "__add_category__",
                       child: Text(
-                        '${cat.icon} $name',
-                        style: const TextStyle(color: Colors.white),
+                        "+ Add Category",
+                        style: TextStyle(color: Color(0xFF5B8CFF)),
                       ),
-                    );
-                  }).toList(),
+                    )
+                  ],
                   onChanged: (value) {
+                    if (value == "__add_category__") {
+                      _showAddCategoryDialog();
+                      return;
+                    }
+
                     if (value != null) {
                       final category = widget.categories.firstWhere(
-                        (c) => c.name.trim() == value,
+                            (c) => c.name.trim() == value,
                       );
 
                       setState(() {
@@ -323,11 +340,8 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
           ),
         ),
         const SizedBox(width: 8),
-        if (_selectedCategoryId != null &&
-            widget.categories
-                .firstWhere((c) => c.id == _selectedCategoryId)
-                .subCategories
-                .isNotEmpty)
+
+        if (_selectedCategoryId != null)
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -354,24 +368,35 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
                     isExpanded: true,
                     dropdownColor: const Color(0xFF1A1F2E),
                     underline: const SizedBox(),
-                    icon: const Icon(
-                      Icons.arrow_drop_down,
-                      color: Colors.white,
-                    ),
-                    items: widget.categories
-                        .firstWhere((c) => c.id == _selectedCategoryId)
-                        .subCategories
-                        .map((sub) {
-                          return DropdownMenuItem(
-                            value: sub.name,
-                            child: Text(
-                              '${sub.icon} ${sub.name}',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          );
-                        })
-                        .toList(),
+                    icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+                    items: [
+                      ...widget.categories
+                          .firstWhere((c) => c.id == _selectedCategoryId)
+                          .subCategories
+                          .map((sub) {
+                        return DropdownMenuItem(
+                          value: sub.name,
+                          child: Text(
+                            '${sub.icon} ${sub.name}',
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        );
+                      }),
+
+                      const DropdownMenuItem(
+                        value: "__add_sub__",
+                        child: Text(
+                          "+ Add SubCategory",
+                          style: TextStyle(color: Color(0xFF5B8CFF)),
+                        ),
+                      )
+                    ],
                     onChanged: (value) {
+                      if (value == "__add_sub__") {
+                        _showAddSubCategoryDialog();
+                        return;
+                      }
+
                       setState(() {
                         _selectedSubCategory = value;
                       });
@@ -382,6 +407,118 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
             ),
           ),
       ],
+    );
+  }
+
+  void _showAddCategoryDialog() {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          title: const Text("Add Category", style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Category name",
+              hintStyle: TextStyle(color: Colors.white38),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+
+                final name = controller.text.trim();
+                if (name.isEmpty) return;
+
+                final id = await _supabaseService.addCategory(name);
+
+                if (id == null) return;
+
+                final newCat = Category(
+                  id: id,
+                  name: name,
+                  icon: "💰",
+                );
+
+                setState(() {
+                  widget.categories.add(newCat);
+                  _selectedCategory = name;
+                  _selectedCategoryId = id;
+                });
+
+                Navigator.pop(context);
+              },
+              child: const Text("Add"),
+            )
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAddSubCategoryDialog() {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1A1F2E),
+          title:
+          const Text("Add SubCategory", style: TextStyle(color: Colors.white)),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: "Sub category name",
+              hintStyle: TextStyle(color: Colors.white38),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+
+                final name = controller.text.trim();
+                if (name.isEmpty) return;
+
+                final id = await _supabaseService.addSubCategory(
+                    _selectedCategoryId!, name);
+
+                if (id == null) return;
+
+                final category =
+                widget.categories.firstWhere((c) => c.id == _selectedCategoryId);
+
+                final sub = SubCategory(
+                  id: id,
+                  name: name,
+                  categoryId: category.id,
+                );
+
+                setState(() {
+                  category.subCategories.add(sub);
+                  _selectedSubCategory = name;
+                });
+
+                Navigator.pop(context);
+              } ,
+              child: const Text("Add"),
+            )
+          ],
+        );
+      },
     );
   }
 
@@ -697,8 +834,7 @@ class _AddInvestmentModalState extends State<AddInvestmentModal> {
     }
 
     final investment = Investment(
-      id: widget.investment?.id ??
-          DateTime.now().millisecondsSinceEpoch.toString(),
+      id: widget.investment?.id ?? '',
       date: _dateController.text,
       category: _selectedCategory,
       subCategory: _selectedSubCategory,

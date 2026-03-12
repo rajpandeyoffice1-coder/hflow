@@ -41,7 +41,9 @@ class SupabaseService {
   }
 
   Future<void> addInvestment(Investment investment) async {
-    await _client.from('investments').insert({
+    final response = await _client
+        .from('investments')
+        .insert({
       'user_id': userId,
       'date': investment.date,
       'amount': investment.amount,
@@ -51,7 +53,10 @@ class SupabaseService {
       'payment_method': investment.paymentMethod,
       'owner': investment.owner,
       'goal_id': investment.goalId,
-    });
+    })
+        .select()
+        .single();
+
   }
 
   Future<void> updateInvestment(Investment investment) async {
@@ -67,7 +72,7 @@ class SupabaseService {
           'sub_category_id': investment.subCategoryId,
           'goal_id': investment.goalId,
         })
-        .eq('id', int.parse(investment.id));
+        .eq('id', int.tryParse(investment.id) ?? 0);
   }
 
   Future<void> deleteInvestment(String id) async {
@@ -83,6 +88,41 @@ class SupabaseService {
 
     return (response as List).map((json) => Redemption.fromJson(json)).toList();
   }
+
+  Future<int?> addCategory(String name) async {
+
+    final response = await _client
+        .from('investment_categories')
+        .insert({
+      'user_id': userId,
+      'name': name,
+      'icon': '💰',
+      'color': '#6366F1'
+    })
+        .select()
+        .single();
+
+    return response['id'];
+  }
+
+
+  Future<int?> addSubCategory(int categoryId, String name) async {
+
+    final response = await _client
+        .from('investment_sub_categories')
+        .insert({
+      'user_id': userId,
+      'category_id': categoryId,
+      'name': name,
+      'icon': '📌',
+      'color': '#6366F1'
+    })
+        .select()
+        .single();
+
+    return response['id'];
+  }
+
 
   Future<void> addRedemption(
     String investmentId,

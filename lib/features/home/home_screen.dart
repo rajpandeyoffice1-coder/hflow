@@ -44,28 +44,64 @@ class _HomeScreenState extends State<HomeScreen>
   List<dynamic> recentTransactions = [];
   List<dynamic> recentInvoices = [];
   List<dynamic> expenses = [];
+  List<dynamic> allInvoices = [];
+  List<dynamic> allExpenses = [];
   Map<String, double> analyticsData = {};
   Map<String, double> clientRevenue = {};
   Map<String, double> monthlyTrend = {};
 
+  String _getGreeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return "Good Morning";
+    if (hour < 17) return "Good Afternoon";
+    if (hour < 21) return "Good Evening";
+    return "Good Night";
+  }
+
   bool isLoading = true;
   bool _isInitialized = false;
-  String userName = "Raj";
+  String userName = "Hari";
 
-  String _selectedFilter = "All Time";
-  String _selectedFilterAnalytic = "6 months";
-  final List<String> _filters = ["Week", "Month", "6 months", "Year"];
-  String _selectedTrend = "Monthly";
-  final List<String> _trendOptions = ["Daily", "Monthly", "Yearly"];
+  // Filter states for different sections
+  String _transactionsFilter = "All Time";
+  final List<String> _transactionsFilters = ["All Time", "Today", "This Week", "This Month"];
 
-  List<String> _months = [];
+  String _analyticsFilter = "6 Months";
+  final List<String> _analyticsFilters = ["3 Months", "6 Months", "Custom"];
+
+  String _monthlyTrendFilter = "6 Months";
+  final List<String> _monthlyTrendFilters = ["3 Months", "6 Months", "Custom"];
+
+  String _incomeExpenseFilter = "6 Months";
+  final List<String> _incomeExpenseFilters = ["3 Months", "6 Months", "Custom"];
+
+  String _overviewFilter = "6 Months";
+  final List<String> _overviewFilters = ["1 Month", "3 Months", "6 Months", "Custom"];
+
+  // Custom range states
+  DateTime? _analyticsCustomStart;
+  DateTime? _analyticsCustomEnd;
+  DateTime? _monthlyTrendCustomStart;
+  DateTime? _monthlyTrendCustomEnd;
+  DateTime? _incomeExpenseCustomStart;
+  DateTime? _incomeExpenseCustomEnd;
+  DateTime? _overviewCustomStart;
+  DateTime? _overviewCustomEnd;
+
+  // Chart data
+  List<String> _analyticsMonths = [];
+  List<double> _analyticsData = [];
+
+  List<String> _monthlyTrendMonths = [];
+  List<double> _monthlyTrendData = [];
+
+  List<String> _incomeExpenseMonths = [];
   List<double> _incomeChartData = [];
   List<double> _expenseChartData = [];
 
-  int _monthFilter = 6;
-
-  DateTime? _customStartMonth;
-  DateTime? _customEndMonth;
+  List<String> _overviewMonths = [];
+  double _overviewIncome = 0;
+  double _overviewExpenses = 0;
 
   final List<double> _incomeData = List.filled(12, 0);
   final List<double> _expenseData = List.filled(12, 0);
@@ -73,16 +109,13 @@ class _HomeScreenState extends State<HomeScreen>
   int _selectedSegmentIndex = 0;
   late TabController _segmentTabController;
 
-  // Cache for dashboard data
   Map<String, dynamic> _dashboardCache = {};
   DateTime? _lastCacheUpdate;
 
   @override
   void initState() {
     super.initState();
-
     _segmentTabController = TabController(length: 4, vsync: this);
-
     _segmentTabController.addListener(() {
       if (!_segmentTabController.indexIsChanging) {
         setState(() {
@@ -90,27 +123,16 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     });
-
-    _generateLastMonths();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeData();
     });
   }
 
   Future<void> _refreshDashboard() async {
-    setState(() {
-      isLoading = true;
-    });
-
-    _lastCacheUpdate = null; // clear cache
+    setState(() => isLoading = true);
+    _lastCacheUpdate = null;
     await loadDashboardData();
-
-    if (mounted) {
-      setState(() {
-        isLoading = false;
-      });
-    }
+    if (mounted) setState(() => isLoading = false);
   }
 
   Future<void> _initializeData() async {
@@ -120,55 +142,10 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (e) {
       print("Init error: $e");
     }
-
-    if (mounted) {
-      setState(() {
-        _isInitialized = true;
-        isLoading = false;
-      });
-    }
-  }
-
-  void _generateLastMonths() {
-    _months.clear();
-    _incomeChartData.clear();
-    _expenseChartData.clear();
-
-    DateTime now = DateTime.now();
-
-    for (int i = _monthFilter - 1; i >= 0; i--) {
-      DateTime month = DateTime(now.year, now.month - i, 1);
-      _months.add(DateFormat('MMM').format(month));
-
-      int index = month.month - 1;
-      _incomeChartData.add(_incomeData[index]);
-      _expenseChartData.add(_expenseData[index]);
-    }
-  }
-
-  void _generateCustomMonths() {
-    if (_customStartMonth == null || _customEndMonth == null) return;
-
-    _months.clear();
-    _incomeChartData.clear();
-    _expenseChartData.clear();
-
-    DateTime current = DateTime(_customStartMonth!.year, _customStartMonth!.month, 1);
-
-    while (!current.isAfter(_customEndMonth!)) {
-      int index = (current.month - 1) % 12;
-      _months.add(DateFormat('MMM').format(current));
-      _incomeChartData.add(_incomeData[index]);
-      _expenseChartData.add(_expenseData[index]);
-      current = DateTime(current.year, current.month + 1, 1);
-    }
-  }
-
-  void _resetMonthlyData() {
-    for (int i = 0; i < 12; i++) {
-      _incomeData[i] = 0;
-      _expenseData[i] = 0;
-    }
+    if (mounted) setState(() {
+      _isInitialized = true;
+      isLoading = false;
+    });
   }
 
   @override
@@ -185,13 +162,12 @@ class _HomeScreenState extends State<HomeScreen>
           .select('profile_name, profile_email')
           .eq('user_id', userId)
           .maybeSingle();
-
       if (settings != null && mounted) {
         setState(() {
           userSettings = settings;
           userName = settings['profile_name'] ??
               settings['profile_email'] ??
-              "Raj.p@urbanites.in";
+              "hari@abcd.com";
         });
       }
     } catch (e) {
@@ -200,7 +176,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> loadDashboardData() async {
-    // Check cache (5 minutes cache duration)
     if (_lastCacheUpdate != null &&
         DateTime.now().difference(_lastCacheUpdate!).inMinutes < 5) {
       return;
@@ -209,9 +184,7 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       final userId = supabase.auth.currentUser?.id ?? 'default_user';
       final now = DateTime.now();
-      final sixMonthsAgo = DateTime(now.year, now.month - 5, 1);
 
-      // Execute multiple queries in parallel for better performance
       final results = await Future.wait([
         supabase
             .from('balance_summary')
@@ -219,30 +192,24 @@ class _HomeScreenState extends State<HomeScreen>
             .order('last_calculated_at', ascending: false)
             .limit(1)
             .maybeSingle(),
-
         supabase
             .from('invoices')
             .select('id, client_name, amount, date_issued, status')
             .order('date_issued', ascending: false)
             .limit(5),
-
         supabase
             .from('expenses')
             .select('id, amount, description, date_incurred, category_name, vendor_name')
             .order('date_incurred', ascending: false)
             .limit(10),
-
         supabase
             .from('clients')
             .select('name, total_amount')
             .order('total_amount', ascending: false)
             .limit(5),
-
-        // Get monthly aggregated data for last 6 months only
         supabase
             .from('invoices')
             .select('amount, date_issued, status'),
-
         supabase
             .from('expenses')
             .select('amount, date_incurred'),
@@ -252,49 +219,42 @@ class _HomeScreenState extends State<HomeScreen>
       final invoices = results[1] as List;
       final expensesData = results[2] as List;
       final clients = results[3] as List;
-      final recentInvoicesData = results[4] as List;
-      final recentExpensesData = results[5] as List;
+      final allInvoiceData = results[4] as List;
+      final allExpenseData = results[5] as List;
 
       if (summary.isNotEmpty && mounted) {
         balanceSummary = summary;
       }
 
-      // Process monthly data efficiently
-      _resetMonthlyData();
+      for (int i = 0; i < 12; i++) {
+        _incomeData[i] = 0;
+        _expenseData[i] = 0;
+      }
 
-      // Process invoices for monthly data
-      for (var inv in recentInvoicesData) {
+      for (var inv in allInvoiceData) {
         try {
           if (inv['status'] != 'Paid') continue;
-
           DateTime date = DateTime.parse(inv['date_issued']);
           int monthIndex = date.month - 1;
-
           double amount = (inv['amount'] as num?)?.toDouble() ?? 0;
-
           _incomeData[monthIndex] += amount;
         } catch (e) {
           continue;
         }
       }
 
-      // Process expenses for monthly data
-      for (var exp in recentExpensesData) {
+      for (var exp in allExpenseData) {
         try {
           DateTime date = DateTime.parse(exp['date_incurred']);
           int monthIndex = date.month - 1;
-
           double amount = (exp['amount'] as num?)?.toDouble() ?? 0;
-
           _expenseData[monthIndex] += amount;
         } catch (e) {
           continue;
         }
       }
 
-      // Build transactions list efficiently
       final List<Map<String, dynamic>> transactions = [];
-
       for (var inv in invoices) {
         transactions.add({
           'id': inv['id'],
@@ -305,7 +265,6 @@ class _HomeScreenState extends State<HomeScreen>
           'date': DateTime.parse(inv['date_issued']),
         });
       }
-
       for (var exp in expensesData) {
         transactions.add({
           'id': exp['id'],
@@ -317,10 +276,8 @@ class _HomeScreenState extends State<HomeScreen>
           'date': DateTime.parse(exp['date_incurred']),
         });
       }
-
       transactions.sort((a, b) => b['date'].compareTo(a['date']));
 
-      // Update client revenue
       final Map<String, double> revenue = {};
       for (var client in clients) {
         revenue[client['name'] ?? 'Client'] = (client['total_amount'] as num?)?.toDouble() ?? 0;
@@ -328,161 +285,328 @@ class _HomeScreenState extends State<HomeScreen>
 
       recentInvoices = invoices.take(5).toList();
       expenses = expensesData;
+      allInvoices = allInvoiceData;
+      allExpenses = allExpenseData;
       recentTransactions = transactions.take(4).toList();
       clientRevenue = revenue;
       _lastCacheUpdate = DateTime.now();
-      _generateLastMonths();
-      _applyOverviewFilter();
 
-      if (mounted) {
-        setState(() {});
-      }
+      _applyAllFilters();
 
+      if (mounted) setState(() {});
     } catch (e) {
       print('Error loading dashboard data: $e');
     }
   }
 
+  void _applyAllFilters() {
+    _applyAnalyticsFilter();
+    _applyMonthlyTrendFilter();
+    _applyIncomeExpenseFilter();
+    _applyOverviewFilter();
+  }
+
+  void _applyAnalyticsFilter() {
+    DateTime now = DateTime.now();
+    DateTime startDate;
+    int months = 6;
+
+    if (_analyticsFilter == "Custom" && _analyticsCustomStart != null && _analyticsCustomEnd != null) {
+      startDate = _analyticsCustomStart!;
+    } else {
+      switch (_analyticsFilter) {
+        case "3 Months":
+          months = 3;
+          break;
+        case "6 Months":
+          months = 6;
+          break;
+        default:
+          months = 6;
+      }
+      startDate = DateTime(now.year, now.month - months + 1, 1);
+    }
+
+    _analyticsMonths.clear();
+    _analyticsData.clear();
+
+    DateTime current = DateTime(startDate.year, startDate.month, 1);
+    DateTime endDate = _analyticsFilter == "Custom" && _analyticsCustomEnd != null
+        ? _analyticsCustomEnd!
+        : now;
+
+    while (!current.isAfter(endDate)) {
+      _analyticsMonths.add(DateFormat('MMM yyyy').format(current));
+      int index = current.month - 1;
+      _analyticsData.add(_incomeData[index] - _expenseData[index]);
+      current = DateTime(current.year, current.month + 1, 1);
+    }
+  }
+
+  void _applyMonthlyTrendFilter() {
+    DateTime now = DateTime.now();
+    DateTime startDate;
+    int months = 6;
+
+    if (_monthlyTrendFilter == "Custom" && _monthlyTrendCustomStart != null && _monthlyTrendCustomEnd != null) {
+      startDate = _monthlyTrendCustomStart!;
+    } else {
+      switch (_monthlyTrendFilter) {
+        case "3 Months":
+          months = 3;
+          break;
+        case "6 Months":
+          months = 6;
+          break;
+        default:
+          months = 6;
+      }
+      startDate = DateTime(now.year, now.month - months + 1, 1);
+    }
+
+    _monthlyTrendMonths.clear();
+    _monthlyTrendData.clear();
+
+    DateTime current = DateTime(startDate.year, startDate.month, 1);
+    DateTime endDate = _monthlyTrendFilter == "Custom" && _monthlyTrendCustomEnd != null
+        ? _monthlyTrendCustomEnd!
+        : now;
+
+    while (!current.isAfter(endDate)) {
+      _monthlyTrendMonths.add(DateFormat('MMM').format(current));
+      int index = current.month - 1;
+      _monthlyTrendData.add(_incomeData[index]);
+      current = DateTime(current.year, current.month + 1, 1);
+    }
+  }
+
+  void _applyIncomeExpenseFilter() {
+    DateTime now = DateTime.now();
+    DateTime startDate;
+    int months = 6;
+
+    if (_incomeExpenseFilter == "Custom" && _incomeExpenseCustomStart != null && _incomeExpenseCustomEnd != null) {
+      startDate = _incomeExpenseCustomStart!;
+    } else {
+      switch (_incomeExpenseFilter) {
+        case "3 Months":
+          months = 3;
+          break;
+        case "6 Months":
+          months = 6;
+          break;
+        default:
+          months = 6;
+      }
+      startDate = DateTime(now.year, now.month - months + 1, 1);
+    }
+
+    _incomeExpenseMonths.clear();
+    _incomeChartData.clear();
+    _expenseChartData.clear();
+
+    DateTime current = DateTime(startDate.year, startDate.month, 1);
+    DateTime endDate = _incomeExpenseFilter == "Custom" && _incomeExpenseCustomEnd != null
+        ? _incomeExpenseCustomEnd!
+        : now;
+
+    while (!current.isAfter(endDate)) {
+      _incomeExpenseMonths.add(DateFormat('MMM').format(current));
+      int index = current.month - 1;
+      _incomeChartData.add(_incomeData[index]);
+      _expenseChartData.add(_expenseData[index]);
+      current = DateTime(current.year, current.month + 1, 1);
+    }
+  }
+
+  void _applyOverviewFilter() {
+    DateTime now = DateTime.now();
+    DateTime startDate;
+    int months = 6;
+
+    if (_overviewFilter == "Custom" && _overviewCustomStart != null && _overviewCustomEnd != null) {
+      startDate = _overviewCustomStart!;
+    } else {
+      switch (_overviewFilter) {
+        case "1 Month":
+          months = 1;
+          break;
+        case "3 Months":
+          months = 3;
+          break;
+        case "6 Months":
+          months = 6;
+          break;
+        default:
+          months = 6;
+      }
+      startDate = DateTime(now.year, now.month - months + 1, 1);
+    }
+
+    _overviewMonths.clear();
+    double income = 0;
+    double expenseTotal = 0;
+
+    DateTime endDate = _overviewFilter == "Custom" && _overviewCustomEnd != null
+        ? _overviewCustomEnd!
+        : now;
+
+    for (var inv in allInvoices) {
+      try {
+        DateTime date = DateTime.parse(inv['date_issued']);
+        if (date.isAfter(startDate) && !date.isAfter(endDate)) {
+          income += (inv['amount'] as num?)?.toDouble() ?? 0;
+        }
+      } catch (e) {}
+    }
+
+    for (var exp in allExpenses) {
+      try {
+        DateTime date = DateTime.parse(exp['date_incurred']);
+        if (date.isAfter(startDate) && !date.isAfter(endDate)) {
+          expenseTotal += (exp['amount'] as num?)?.toDouble() ?? 0;
+        }
+      } catch (e) {}
+    }
+
+    _overviewIncome = income;
+    _overviewExpenses = expenseTotal;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-        value: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.light,
-        ),
-        child: WillPopScope(
-          onWillPop: () async {
-
-            // If not on home tab → go to home tab
-            if (_currentIndex != 0) {
-              setState(() {
-                _currentIndex = 0;
-              });
-              return false;
-            }
-
-            // If already on home → exit app
-            return true;
-          },
-          child: Scaffold(
-        backgroundColor: const Color(0xFF05060A),
-        body: Stack(
-          children: [
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF0B0F1A), Color(0xFF05060A)],
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: WillPopScope(
+        onWillPop: () async {
+          if (_currentIndex != 0) {
+            setState(() => _currentIndex = 0);
+            return false;
+          }
+          return true;
+        },
+        child: Scaffold(
+          backgroundColor: const Color(0xFF05060A),
+          body: Stack(
+            children: [
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF0B0F1A), Color(0xFF05060A)],
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              top: -120,
-              left: -100,
-              child: _liquidBlob(
-                width: 320,
-                height: 420,
-                color: const Color(0xFF9333EA),
-                opacity: 0.28,
-              ),
-            ),
-            Positioned(
-              bottom: -160,
-              right: -120,
-              child: _liquidBlob(
-                width: 380,
-                height: 460,
-                color: const Color(0xFF3B82F6),
-                opacity: 0.26,
-              ),
-            ),
-            if (_currentIndex == 0)
               Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: SizedBox(
-                  height: _topBarHeight,
-                  child: GlassTopBar(
-                    leading: Image.asset(
-                      'assets/images/logo_new.png',
-                      height: 36,
-                    ),
-                    actions: [
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const NotificationsScreen(),
-                            ),
-                          );
-                        },
-                        child: const Icon(
-                          Icons.notifications_none,
-                          color: Colors.white,
-                        ),
+                top: -120,
+                left: -100,
+                child: _liquidBlob(
+                  width: 320,
+                  height: 420,
+                  color: const Color(0xFF9333EA),
+                  opacity: 0.28,
+                ),
+              ),
+              Positioned(
+                bottom: -160,
+                right: -120,
+                child: _liquidBlob(
+                  width: 380,
+                  height: 460,
+                  color: const Color(0xFF3B82F6),
+                  opacity: 0.26,
+                ),
+              ),
+              if (_currentIndex == 0)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: SizedBox(
+                    height: _topBarHeight,
+                    child: GlassTopBar(
+                      leading: Image.asset(
+                        'assets/images/logo_new.png',
+                        height: 36,
                       ),
-                      const SizedBox(width: 10),
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ProfileScreen(),
-                            ),
-                          );
-                        },
-                        child: CircleAvatar(
-                          radius: 18,
-                          backgroundColor: const Color(0xFF5B8CFF),
-                          child: Text(
-                            userName.isNotEmpty ? userName[0].toUpperCase() : 'R',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                      actions: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const NotificationsScreen(),
+                              ),
+                            );
+                          },
+                          child: const Icon(
+                            Icons.notifications_none,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ProfileScreen(),
+                              ),
+                            );
+                          },
+                          child: CircleAvatar(
+                            radius: 18,
+                            backgroundColor: const Color(0xFF5B8CFF),
+                            child: Text(
+                              userName.isNotEmpty ? userName[0].toUpperCase() : 'R',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: EdgeInsets.only(
+                  top: _currentIndex == 0 ? _topBarHeight - 10 : 0,
+                ),
+                child: SafeArea(
+                  child: IndexedStack(
+                    index: _currentIndex,
+                    children: [
+                      _homeContent(),
+                      ExpenseScreen(
+                        onBack: () => setState(() => _currentIndex = 0),
+                      ),
+                      AiAssistantScreen(
+                        onBack: () => setState(() => _currentIndex = 0),
+                      ),
+                      InvestmentPortfolioScreen(
+                        onBack: () => setState(() => _currentIndex = 0),
+                      ),
+                      SettingsScreen(
+                        onBack: () => setState(() => _currentIndex = 0),
                       ),
                     ],
                   ),
                 ),
               ),
-            Padding(
-              padding: EdgeInsets.only(
-                top: _currentIndex == 0 ? _topBarHeight - 10 : 0,
-              ),
-              child: SafeArea(
-                child: IndexedStack(
-                  index: _currentIndex,
-                  children: [
-                    _homeContent(),
-                    ExpenseScreen(
-                      onBack: () => setState(() => _currentIndex = 0),
-                    ),
-                    AiAssistantScreen(
-                      onBack: () => setState(() => _currentIndex = 0),
-                    ),
-                    InvestmentPortfolioScreen(
-                      onBack: () => setState(() => _currentIndex = 0),
-                    ),
-                    SettingsScreen(
-                      onBack: () => setState(() => _currentIndex = 0),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-        bottomNavigationBar: UltraGlassBottomNav(
-          currentIndex: _currentIndex,
-          onTap: (i) => setState(() => _currentIndex = i),
+            ],
+          ),
+          bottomNavigationBar: UltraGlassBottomNav(
+            currentIndex: _currentIndex,
+            onTap: (i) => setState(() => _currentIndex = i),
+          ),
         ),
       ),
-        ),
     );
   }
 
@@ -515,7 +639,7 @@ class _HomeScreenState extends State<HomeScreen>
           children: [
             const SizedBox(height: 10),
             Text(
-              "Good afternoon, ${userName.split('@')[0]}",
+              "${_getGreeting()}, ${userName.split('@')[0]}",
               style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
@@ -524,7 +648,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 4),
             const Text(
-              "Here’s your financial overview",
+              "Here's your financial overview",
               style: TextStyle(color: Colors.white54),
             ),
             const SizedBox(height: 20),
@@ -549,6 +673,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
   }
+
   Widget _buildSegmentContent() {
     switch (_selectedSegmentIndex) {
       case 0:
@@ -604,7 +729,14 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-              _filterDropdown(),
+              _buildFilterDropdown(
+                value: _transactionsFilter,
+                items: _transactionsFilters,
+                onChanged: (value) {
+                  setState(() => _transactionsFilter = value!);
+                  _filterTransactions(value!);
+                },
+              ),
             ],
           ),
           const SizedBox(height: 18),
@@ -645,7 +777,11 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _filterDropdown() {
+  Widget _buildFilterDropdown({
+    required String value,
+    required List<String> items,
+    required Function(String?) onChanged,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -655,20 +791,17 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _selectedFilter,
+          value: value,
           dropdownColor: const Color(0xFF1A1C2A),
           icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-          style: const TextStyle(color: Colors.white),
-          onChanged: (value) {
-            setState(() => _selectedFilter = value!);
-            _filterTransactions(value!);
-          },
-          items: const [
-            DropdownMenuItem(value: "All Time", child: Text("All Time")),
-            DropdownMenuItem(value: "Today", child: Text("Today")),
-            DropdownMenuItem(value: "This Week", child: Text("This Week")),
-            DropdownMenuItem(value: "This Month", child: Text("This Month")),
-          ],
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+          onChanged: onChanged,
+          items: items.map((String item) {
+            return DropdownMenuItem(
+              value: item,
+              child: Text(item),
+            );
+          }).toList(),
         ),
       ),
     );
@@ -752,7 +885,7 @@ class _HomeScreenState extends State<HomeScreen>
       String amount, {
         String? vendor,
         bool isExpense = false,
-      }){
+      }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -783,14 +916,11 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-
               const SizedBox(height: 4),
-
               Text(
                 subtitle,
                 style: const TextStyle(fontSize: 12, color: Colors.white54),
               ),
-
               if (vendor != null)
                 Text(
                   vendor,
@@ -814,87 +944,79 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _analyticsSection() {
-    double maxValue = _getMaxChartValue();
-    double safeMax = maxValue == 0 ? 10000 : maxValue * 1.2;
+    double maxValue = _analyticsData.isEmpty ? 10000 : _analyticsData.reduce((a, b) => a > b ? a : b);
+    double minValue = _analyticsData.isEmpty ? -10000 : _analyticsData.reduce((a, b) => a < b ? a : b);
+    double range = maxValue - minValue;
+    double safeMax = maxValue + range * 0.1;
+    double safeMin = minValue - range * 0.1;
 
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
-          /// HEADER
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                "Analytics",
+                "Profit/Loss Analytics",
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   fontSize: 16,
                   color: Colors.white,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedFilterAnalytic,
-                    dropdownColor: const Color(0xff1C1C1E),
-                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    items: _filters.map((String value) {
-                      return DropdownMenuItem(value: value, child: Text(value));
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedFilterAnalytic = value);
-                      }
-                    },
-                  ),
-                ),
+              _buildFilterDropdown(
+                value: _analyticsFilter,
+                items: _analyticsFilters,
+                onChanged: (value) async {
+                  if (value == "Custom") {
+                    await _showCustomRangeDialog(
+                      title: "Select Date Range for Analytics",
+                      onConfirm: (start, end) {
+                        setState(() {
+                          _analyticsFilter = "Custom";
+                          _analyticsCustomStart = start;
+                          _analyticsCustomEnd = end;
+                          _applyAnalyticsFilter();
+                        });
+                      },
+                    );
+                  } else {
+                    setState(() {
+                      _analyticsFilter = value!;
+                      _analyticsCustomStart = null;
+                      _analyticsCustomEnd = null;
+                      _applyAnalyticsFilter();
+                    });
+                  }
+                },
               ),
             ],
           ),
-
           const SizedBox(height: 16),
-
-          /// INCOME TEXT
-          const Text(
-            "Expected income",
+          Text(
+            "Net Profit/Loss",
             style: TextStyle(color: Colors.white54),
           ),
-
           const SizedBox(height: 6),
-
           Text(
-            "₹${NumberFormat('#,##0').format(_getTotalIncome())}",
+            "₹${NumberFormat('#,##0').format(_analyticsData.fold(0.0, (a, b) => a + b))}",
             style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
               color: Colors.white,
             ),
           ),
-
           const SizedBox(height: 24),
-
-          /// CHART
           SizedBox(
-            height: 220, // increased height
+            height: 220,
             child: LineChart(
               LineChartData(
-
-                /// prevent graph overflow
-                minY: _getMinChartValue(),
+                minY: safeMin,
                 maxY: safeMax,
-
-                /// GRID
                 gridData: FlGridData(
                   show: true,
-                  horizontalInterval: safeMax / 4,
+                  horizontalInterval: range / 4,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
                       color: Colors.white.withOpacity(0.15),
@@ -902,8 +1024,6 @@ class _HomeScreenState extends State<HomeScreen>
                     );
                   },
                 ),
-
-                /// TITLES
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
@@ -921,23 +1041,36 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     ),
                   ),
-
-                  bottomTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        int index = value.toInt();
+                        if (index >= 0 && index < _analyticsMonths.length) {
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              _analyticsMonths[index],
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          );
+                        }
+                        return const SizedBox();
+                      },
+                    ),
                   ),
-
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
-
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-
                 borderData: FlBorderData(show: false),
-
-                /// TOOLTIP
                 lineTouchData: LineTouchData(
                   handleBuiltInTouches: true,
                   touchTooltipData: LineTouchTooltipData(
@@ -948,8 +1081,8 @@ class _HomeScreenState extends State<HomeScreen>
                       return spots.map((spot) {
                         return LineTooltipItem(
                           "₹${spot.y.toStringAsFixed(0)}",
-                          const TextStyle(
-                            color: Colors.white,
+                          TextStyle(
+                            color: spot.y >= 0 ? Colors.green : Colors.red,
                             fontWeight: FontWeight.bold,
                           ),
                         );
@@ -957,27 +1090,29 @@ class _HomeScreenState extends State<HomeScreen>
                     },
                   ),
                 ),
-
-                /// LINE DATA
                 lineBarsData: [
                   LineChartBarData(
-                    spots: _getChartData(),
-
+                    spots: List.generate(_analyticsMonths.length, (index) {
+                      return FlSpot(index.toDouble(), _analyticsData[index]);
+                    }),
                     isCurved: true,
                     barWidth: 3,
                     isStrokeCapRound: true,
-
                     gradient: const LinearGradient(
-                      colors: [
-                        Color(0xffA78BFA),
-                        Color(0xff6366F1),
-                      ],
+                      colors: [Color(0xffA78BFA), Color(0xff6366F1)],
                     ),
-
                     dotData: const FlDotData(show: false),
-
-                    /// remove grey overlay
-                    belowBarData: BarAreaData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xff6366F1).withOpacity(0.3),
+                          const Color(0xffA78BFA).withOpacity(0.1),
+                        ],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -988,74 +1123,14 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  double _getMinChartValue() {
-    double min = 0;
-
-    for (var spot in _getChartData()) {
-      if (spot.y < min) min = spot.y;
-    }
-
-    // Always allow at least -200K
-    if (min > -200000) {
-      return -200000;
-    }
-
-    return min * 1.2;
-  }
-
-  double _getTotalIncome() {
-    double total = 0;
-    for (var inv in recentInvoices) {
-      total += (inv['amount'] as num?)?.toDouble() ?? 0;
-    }
-    return total;
-  }
-
-  double _getMaxChartValue() {
-    double max = 0;
-    for (var spot in _getChartData()) {
-      if (spot.y > max) max = spot.y;
-    }
-    return max > 0 ? max + 1000 : 10000;
-  }
-
-  List<FlSpot> _getChartData() {
-    int count = 6;
-
-    switch (_selectedFilterAnalytic) {
-      case "Week":
-        count = 7;
-        break;
-      case "Month":
-        count = 5;
-        break;
-      case "Year":
-        count = 12;
-        break;
-      default:
-        count = 6;
-    }
-
-    return List.generate(count, (i) {
-      double value = i < _incomeChartData.length
-          ? _incomeChartData[i]
-          : 0;
-
-      if (value < 0) value = 0;
-
-      return FlSpot(i.toDouble(), value);
-    });
-  }
-
   Widget _monthlyTrendSection() {
-    double maxValue = _getMaxBarValue();
-    double safeMax = maxValue == 0 ? 10000 : maxValue * 1.2;
+    double maxValue = _monthlyTrendData.isEmpty ? 10000 : _monthlyTrendData.reduce((a, b) => a > b ? a : b);
+    double safeMax = maxValue * 1.2;
 
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          /// HEADER
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -1067,47 +1142,43 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedTrend,
-                    dropdownColor: const Color(0xff1C1C1E),
-                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-                    style: const TextStyle(color: Colors.white),
-                    items: _trendOptions.map((String value) {
-                      return DropdownMenuItem(value: value, child: Text(value));
-                    }).toList(),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedTrend = value);
-                      }
-                    },
-                  ),
-                ),
+              _buildFilterDropdown(
+                value: _monthlyTrendFilter,
+                items: _monthlyTrendFilters,
+                onChanged: (value) async {
+                  if (value == "Custom") {
+                    await _showCustomRangeDialog(
+                      title: "Select Date Range for Monthly Trend",
+                      onConfirm: (start, end) {
+                        setState(() {
+                          _monthlyTrendFilter = "Custom";
+                          _monthlyTrendCustomStart = start;
+                          _monthlyTrendCustomEnd = end;
+                          _applyMonthlyTrendFilter();
+                        });
+                      },
+                    );
+                  } else {
+                    setState(() {
+                      _monthlyTrendFilter = value!;
+                      _monthlyTrendCustomStart = null;
+                      _monthlyTrendCustomEnd = null;
+                      _applyMonthlyTrendFilter();
+                    });
+                  }
+                },
               ),
             ],
           ),
-
           const SizedBox(height: 14),
-
           Divider(color: Colors.white.withOpacity(0.1)),
-
           const SizedBox(height: 20),
-
-          /// CHART
           SizedBox(
             height: 240,
             child: BarChart(
               BarChartData(
                 alignment: BarChartAlignment.spaceBetween,
                 maxY: safeMax,
-
-                /// TOOLTIP
                 barTouchData: BarTouchData(
                   enabled: true,
                   touchTooltipData: BarTouchTooltipData(
@@ -1126,8 +1197,6 @@ class _HomeScreenState extends State<HomeScreen>
                     },
                   ),
                 ),
-
-                /// GRID (same style as analytics)
                 gridData: FlGridData(
                   show: true,
                   horizontalInterval: safeMax / 4,
@@ -1138,10 +1207,7 @@ class _HomeScreenState extends State<HomeScreen>
                     );
                   },
                 ),
-
                 borderData: FlBorderData(show: false),
-
-                /// AXIS
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
@@ -1159,19 +1225,17 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     ),
                   ),
-
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         int index = value.toInt();
-
-                        if (index >= 0 && index < _months.length) {
+                        if (index >= 0 && index < _monthlyTrendMonths.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
-                              _months[index],
+                              _monthlyTrendMonths[index],
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
@@ -1180,36 +1244,28 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           );
                         }
-
                         return const SizedBox();
                       },
                     ),
                   ),
-
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
-
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-
-                /// BARS
-                barGroups: List.generate(_months.length, (index) {
+                barGroups: List.generate(_monthlyTrendMonths.length, (index) {
                   return BarChartGroupData(
                     x: index,
                     barsSpace: 6,
                     barRods: [
                       BarChartRodData(
-                        toY: _incomeChartData[index],
+                        toY: _monthlyTrendData[index],
                         width: 14,
                         borderRadius: BorderRadius.circular(6),
                         gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFFA78BFA),
-                            Color(0xFF6366F1),
-                          ],
+                          colors: [Color(0xFFA78BFA), Color(0xFF6366F1)],
                           begin: Alignment.bottomCenter,
                           end: Alignment.topCenter,
                         ),
@@ -1222,45 +1278,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-    );
-  }
-
-  double _getMaxBarValue() {
-    double max = 0;
-
-    for (double v in _incomeChartData) {
-      if (v > max) max = v;
-    }
-
-    return max == 0 ? 10000 : max * 1.3;
-  }
-
-  BarChartGroupData _barData(int x, double value) {
-    return BarChartGroupData(
-      x: x,
-      barsSpace: 4,
-      barRods: [
-        BarChartRodData(
-          toY: value,
-          width: 14,
-          borderRadius: BorderRadius.circular(6),
-
-          gradient: const LinearGradient(
-            colors: [
-              Color(0xFFA78BFA),
-              Color(0xFF6366F1),
-            ],
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-          ),
-
-          backDrawRodData: BackgroundBarChartRodData(
-            show: true,
-            toY: _getMaxBarValue(),
-            color: Colors.white.withOpacity(0.05),
-          ),
-        ),
-      ],
     );
   }
 
@@ -1357,6 +1374,13 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _incomeExpenseReport() {
+    double maxValue = 0;
+    for (int i = 0; i < _incomeExpenseMonths.length; i++) {
+      if (_incomeChartData[i] > maxValue) maxValue = _incomeChartData[i];
+      if (_expenseChartData[i] > maxValue) maxValue = _expenseChartData[i];
+    }
+    double safeMax = maxValue == 0 ? 10000 : maxValue * 1.3;
+
     return _glassCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1369,7 +1393,7 @@ class _HomeScreenState extends State<HomeScreen>
                   Icon(Icons.bar_chart_rounded, color: Colors.white70, size: 20),
                   SizedBox(width: 8),
                   Text(
-                    "Income vs \nExpenses",
+                    "Income vs Expenses",
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1378,43 +1402,35 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    value: _monthFilter,
-                    dropdownColor: const Color(0xff1C1C1E),
-                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    items: const [
-                      DropdownMenuItem(value: 2, child: Text("2 Months")),
-                      DropdownMenuItem(value: 3, child: Text("3 Months")),
-                      DropdownMenuItem(value: 4, child: Text("4 Months")),
-                      DropdownMenuItem(value: 6, child: Text("6 Months")),
-                      DropdownMenuItem(value: 99, child: Text("Custom Range")),
-                    ],
-                    onChanged: (v) async {
-                      if (v == 99) {
-                        await _selectCustomMonthRange();
-                      } else if (v != null) {
+              _buildFilterDropdown(
+                value: _incomeExpenseFilter,
+                items: _incomeExpenseFilters,
+                onChanged: (value) async {
+                  if (value == "Custom") {
+                    await _showCustomRangeDialog(
+                      title: "Select Date Range for Income vs Expenses",
+                      onConfirm: (start, end) {
                         setState(() {
-                          _monthFilter = v;
-                          _generateLastMonths();
+                          _incomeExpenseFilter = "Custom";
+                          _incomeExpenseCustomStart = start;
+                          _incomeExpenseCustomEnd = end;
+                          _applyIncomeExpenseFilter();
                         });
-                      }
-                    },
-                  ),
-                ),
-              )
+                      },
+                    );
+                  } else {
+                    setState(() {
+                      _incomeExpenseFilter = value!;
+                      _incomeExpenseCustomStart = null;
+                      _incomeExpenseCustomEnd = null;
+                      _applyIncomeExpenseFilter();
+                    });
+                  }
+                },
+              ),
             ],
           ),
-
           const SizedBox(height: 24),
-
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: const [
@@ -1423,20 +1439,17 @@ class _HomeScreenState extends State<HomeScreen>
               _Legend(color: Colors.redAccent, text: "Expenses"),
             ],
           ),
-
           const SizedBox(height: 24),
-
           SizedBox(
             height: 260,
             child: BarChart(
               BarChartData(
                 backgroundColor: Colors.transparent,
-                maxY: _getMaxIncomeExpenseValue(),
+                maxY: safeMax,
                 alignment: BarChartAlignment.spaceAround,
-
                 gridData: FlGridData(
                   show: true,
-                  horizontalInterval: _getMaxIncomeExpenseValue() / 5,
+                  horizontalInterval: safeMax / 5,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (value) {
                     return FlLine(
@@ -1445,9 +1458,7 @@ class _HomeScreenState extends State<HomeScreen>
                     );
                   },
                 ),
-
                 borderData: FlBorderData(show: false),
-
                 barTouchData: BarTouchData(
                   touchTooltipData: BarTouchTooltipData(
                     tooltipBgColor: const Color(0xFF1F2937),
@@ -1465,13 +1476,12 @@ class _HomeScreenState extends State<HomeScreen>
                     },
                   ),
                 ),
-
                 titlesData: FlTitlesData(
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 50,
-                      interval: _getMaxIncomeExpenseValue() / 5,
+                      interval: safeMax / 5,
                       getTitlesWidget: (value, meta) {
                         return Text(
                           "₹${value.toInt()}",
@@ -1483,18 +1493,17 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     ),
                   ),
-
                   bottomTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
                       interval: 1,
                       getTitlesWidget: (value, meta) {
                         int index = value.toInt();
-                        if (index >= 0 && index < _months.length) {
+                        if (index >= 0 && index < _incomeExpenseMonths.length) {
                           return Padding(
                             padding: const EdgeInsets.only(top: 8),
                             child: Text(
-                              _months[index],
+                              _incomeExpenseMonths[index],
                               style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 11,
@@ -1506,17 +1515,14 @@ class _HomeScreenState extends State<HomeScreen>
                       },
                     ),
                   ),
-
                   rightTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
-
                   topTitles: const AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
-
-                barGroups: List.generate(_months.length, (index) {
+                barGroups: List.generate(_incomeExpenseMonths.length, (index) {
                   return BarChartGroupData(
                     x: index,
                     barsSpace: 6,
@@ -1552,105 +1558,269 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _selectCustomMonthRange() async {
+  Future<void> _showCustomRangeDialog({
+    required String title,
+    required Function(DateTime start, DateTime end) onConfirm,
+  }) async {
+
+    DateTime? startDate;
+    DateTime? endDate;
     DateTime now = DateTime.now();
-    DateTime? start = await showDatePicker(
+
+    await showModalBottomSheet(
       context: context,
-      initialDate: DateTime(now.year, now.month - 2, 1),
-      firstDate: DateTime(now.year - 2, 1, 1),
-      lastDate: now,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF6366F1),
-              onPrimary: Colors.white,
-              surface: Color(0xFF1A1C2A),
-              onSurface: Colors.white,
-            ),
-          ),
-          child: child!,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).viewInsets.bottom,
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  color: Colors.white.withOpacity(0.05),
+                ),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+
+                        /// drag handle
+                        Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 16),
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+
+                        /// title
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        /// start date
+                        _dateField(
+                          label: "Start Date",
+                          value: startDate,
+                          onTap: () async {
+
+                            DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate: startDate ??
+                                  now.subtract(const Duration(days: 30)),
+                              firstDate: DateTime(now.year - 2),
+                              lastDate: now,
+                            );
+
+                            if (picked != null) {
+                              setModalState(() {
+                                startDate = picked;
+                              });
+                            }
+                          },
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        /// end date
+                        _dateField(
+                          label: "End Date",
+                          value: endDate,
+                          onTap: () async {
+
+                            DateTime? picked = await showDatePicker(
+                              context: context,
+                              initialDate: endDate ?? now,
+                              firstDate: startDate ?? DateTime(now.year - 2),
+                              lastDate: now,
+                            );
+
+                            if (picked != null) {
+                              setModalState(() {
+                                endDate = picked;
+                              });
+                            }
+                          },
+                        ),
+
+                        const SizedBox(height: 26),
+
+                        /// buttons
+                        Row(
+                          children: [
+
+                            /// cancel
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white70,
+                                  side: BorderSide(
+                                    color: Colors.white.withOpacity(0.2),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text("Cancel"),
+                              ),
+                            ),
+
+                            const SizedBox(width: 12),
+
+                            /// apply
+                            Expanded(
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  backgroundColor: const Color(0xFF6366F1),
+                                ),
+                                onPressed: () {
+
+                                  if (startDate == null || endDate == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text("Select both dates"),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  if (endDate!.isBefore(startDate!)) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                            "End date must be after start date"),
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  onConfirm(startDate!, endDate!);
+                                  Navigator.pop(context);
+                                },
+                                child: const Text(
+                                  "Apply",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         );
       },
     );
+  }
 
-    if (start == null) return;
+  Widget _dateField({
+    required String label,
+    required DateTime? value,
+    required VoidCallback onTap,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
 
-    DateTime? end = await showDatePicker(
-      context: context,
-      initialDate: start,
-      firstDate: start,
-      lastDate: now,
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF6366F1),
-              onPrimary: Colors.white,
-              surface: Color(0xFF1A1C2A),
-              onSurface: Colors.white,
-            ),
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
           ),
-          child: child!,
-        );
-      },
-    );
-
-    if (end == null) return;
-
-    int diffMonths = (end.year - start.year) * 12 + (end.month - start.month) + 1;
-
-    if (diffMonths > 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Maximum range allowed is 6 months"),
-          backgroundColor: Colors.red,
         ),
-      );
-      return;
-    }
 
-    if (mounted) {
-      setState(() {
-        _customStartMonth = DateTime(start.year, start.month, 1);
-        _customEndMonth = DateTime(end.year, end.month, 1);
-        _monthFilter = 99;
-        _generateCustomMonths();
-      });
-    }
+        const SizedBox(height: 6),
+
+        GestureDetector(
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              vertical: 14,
+              horizontal: 14,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: Colors.white.withOpacity(0.06),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.15),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+
+                Text(
+                  value != null
+                      ? DateFormat('dd MMM yyyy').format(value)
+                      : "Select date",
+                  style: TextStyle(
+                    color: value != null
+                        ? Colors.white
+                        : Colors.white54,
+                  ),
+                ),
+
+                const Icon(
+                  Icons.calendar_today,
+                  size: 18,
+                  color: Colors.white70,
+                ),
+
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
-
-  double _getMaxIncomeExpenseValue() {
-    double maxValue = 0;
-
-    for (int i = 0; i < _months.length; i++) {
-      if (_incomeChartData[i] > maxValue) {
-        maxValue = _incomeChartData[i];
-      }
-      if (_expenseChartData[i] > maxValue) {
-        maxValue = _expenseChartData[i];
-      }
-    }
-
-    return maxValue == 0 ? 10000 : maxValue * 1.3;
-  }
-
-  String _selectedOverviewFilter = "Month";
-
-  final List<String> _overviewFilters = [
-    "Month",
-    "3 Months",
-    "6 Months",
-    "1 Year",
-    "Custom"
-  ];
-
-  double _filteredIncome = 0;
-  double _filteredExpenses = 0;
 
   Widget _summaryCards() {
-    double income = _filteredIncome;
-    double expenses = _filteredExpenses;
+    double income = _overviewIncome;
+    double expenses = _overviewExpenses;
     double profit = income - expenses;
     double margin = income > 0 ? (profit / income) * 100 : 0;
 
@@ -1658,12 +1828,9 @@ class _HomeScreenState extends State<HomeScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-
-          /// Header + Filter
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-
               const Text(
                 "Overview",
                 style: TextStyle(
@@ -1672,48 +1839,37 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedOverviewFilter,
-                    dropdownColor: const Color(0xFF1A1C2A),
-                    icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                    items: _overviewFilters.map((value) {
-                      return DropdownMenuItem(
-                        value: value,
-                        child: Text(value),
-                      );
-                    }).toList(),
-                    onChanged: (v) async {
-
-                      if (v == "Custom") {
-                        await _selectCustomMonthRange();
-                      } else {
+              _buildFilterDropdown(
+                value: _overviewFilter,
+                items: _overviewFilters,
+                onChanged: (value) async {
+                  if (value == "Custom") {
+                    await _showCustomRangeDialog(
+                      title: "Select Date Range for Overview",
+                      onConfirm: (start, end) {
                         setState(() {
-                          _selectedOverviewFilter = v!;
+                          _overviewFilter = "Custom";
+                          _overviewCustomStart = start;
+                          _overviewCustomEnd = end;
                           _applyOverviewFilter();
                         });
-                      }
-
-                    },
-                  ),
-                ),
-              )
+                      },
+                    );
+                  } else {
+                    setState(() {
+                      _overviewFilter = value!;
+                      _overviewCustomStart = null;
+                      _overviewCustomEnd = null;
+                      _applyOverviewFilter();
+                    });
+                  }
+                },
+              ),
             ],
           ),
-
           const SizedBox(height: 20),
-
           Row(
             children: [
-
               Expanded(
                 child: _squareStatCard(
                   value: "₹${NumberFormat('#,##0').format(income)}",
@@ -1721,9 +1877,7 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.greenAccent,
                 ),
               ),
-
               const SizedBox(width: 16),
-
               Expanded(
                 child: _squareStatCard(
                   value: "₹${NumberFormat('#,##0').format(expenses)}",
@@ -1731,15 +1885,11 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.redAccent,
                 ),
               ),
-
             ],
           ),
-
           const SizedBox(height: 16),
-
           Row(
             children: [
-
               Expanded(
                 child: _squareStatCard(
                   value: "₹${NumberFormat('#,##0').format(profit)}",
@@ -1747,9 +1897,7 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.blueAccent,
                 ),
               ),
-
               const SizedBox(width: 16),
-
               Expanded(
                 child: _squareStatCard(
                   value: "${margin.toStringAsFixed(1)}%",
@@ -1757,63 +1905,11 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.purpleAccent,
                 ),
               ),
-
             ],
           ),
         ],
       ),
     );
-  }
-
-  void _applyOverviewFilter() {
-
-    DateTime now = DateTime.now();
-    DateTime startDate;
-
-    switch (_selectedOverviewFilter) {
-
-      case "Month":
-        startDate = DateTime(now.year, now.month, 1);
-        break;
-
-      case "3 Months":
-        startDate = DateTime(now.year, now.month - 2, 1);
-        break;
-
-      case "6 Months":
-        startDate = DateTime(now.year, now.month - 5, 1);
-        break;
-
-      case "1 Year":
-        startDate = DateTime(now.year - 1, now.month, 1);
-        break;
-
-      default:
-        startDate = DateTime(now.year, now.month, 1);
-    }
-
-    double income = 0;
-    double expenseTotal = 0;
-
-    for (var inv in recentInvoices) {
-      DateTime date = DateTime.parse(inv['date_issued']);
-      if (date.isAfter(startDate)) {
-        income += (inv['amount'] as num).toDouble();
-      }
-    }
-
-    for (var exp in expenses) {
-      DateTime date = DateTime.parse(exp['date_incurred']);
-      if (date.isAfter(startDate)) {
-        expenseTotal += (exp['amount'] as num).toDouble();
-      }
-    }
-
-    setState(() {
-      _filteredIncome = income;
-      _filteredExpenses = expenseTotal;
-    });
-
   }
 
   Widget _squareStatCard({
@@ -2048,9 +2144,7 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white60,
                 ),
               ),
-
               const SizedBox(height: 8),
-
               Text(
                 "₹${NumberFormat('#,##0').format(balance)}",
                 style: const TextStyle(
@@ -2059,9 +2153,7 @@ class _HomeScreenState extends State<HomeScreen>
                   color: Colors.white,
                 ),
               ),
-
               const SizedBox(height: 26),
-
               Row(
                 children: [
                   Expanded(
@@ -2072,9 +2164,7 @@ class _HomeScreenState extends State<HomeScreen>
                       color: const Color(0xff22c55e),
                     ),
                   ),
-
                   const SizedBox(width: 12),
-
                   Expanded(
                     child: _miniStatCard(
                       title: "EXPENSES",
@@ -2083,9 +2173,7 @@ class _HomeScreenState extends State<HomeScreen>
                       color: const Color(0xffef4444),
                     ),
                   ),
-
                   const SizedBox(width: 12),
-
                   Expanded(
                     child: _miniStatCard(
                       title: "NET PROFIT",
@@ -2110,7 +2198,7 @@ class _HomeScreenState extends State<HomeScreen>
     required Color color,
   }) {
     return Container(
-      height: 100,
+      height: 120,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
@@ -2136,9 +2224,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-
           const Spacer(),
-
           Text(
             title,
             style: const TextStyle(
@@ -2147,9 +2233,7 @@ class _HomeScreenState extends State<HomeScreen>
               color: Colors.white60,
             ),
           ),
-
           const SizedBox(height: 3),
-
           Text(
             value,
             style: const TextStyle(

@@ -27,38 +27,40 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
   late TabController _tabController;
 
-  // Filter states
+  bool _showFilterPanel = false;
   String _selectedCategory = 'All';
   String _selectedPaymentMethod = 'All';
   DateTimeRange? _selectedDateRange;
   bool _showBusinessOnly = false;
 
-  // Database data
   List<Map<String, dynamic>> _allExpenses = [];
   List<Map<String, dynamic>> _expenseCategories = [];
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Stats
   double _totalExpenses = 0;
   double _thisMonthExpenses = 0;
   double _averageExpense = 0;
   int _totalTransactions = 0;
 
-  // Monthly trend data
   List<Map<String, dynamic>> _monthlyTrend = [];
 
-  // Category colors
   final Map<String, Color> _categoryColors = {};
 
-  // Category ID map for lookups
   final Map<String, String> _categoryIdMap = {};
 
-  // Search summary
   Map<String, dynamic> _searchSummary = {'count': 0, 'total': 0.0};
 
-  // Current user ID (you should get this from your auth system)
-  final String _userId = 'default_user'; // Replace with actual user ID from auth
+  final String _userId = 'default_user';
+
+  final List<Map<String, dynamic>> _tableHeaders = [
+    {'label': 'DATE', 'icon': Icons.calendar_today, 'width': 100},
+    {'label': 'DESCRIPTION', 'icon': Icons.description, 'width': 200},
+    {'label': 'CATEGORY', 'icon': Icons.category, 'width': 120},
+    {'label': 'AMOUNT', 'icon': Icons.attach_money, 'width': 100},
+    {'label': 'PAYMENT', 'icon': Icons.payment, 'width': 100},
+    {'label': 'ACTIONS', 'icon': Icons.settings, 'width': 100},
+  ];
 
   @override
   void initState() {
@@ -126,7 +128,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       final newCategoryName = response['name'];
 
-      // Reload categories from database
       await _loadCategories();
 
       return newCategoryName;
@@ -208,7 +209,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           .order('name');
 
       setState(() {
-        // Remove duplicates by using a Map with name as key
         final uniqueCategories = <String, Map<String, dynamic>>{};
         for (var category in response) {
           uniqueCategories[category['name']] = category;
@@ -218,7 +218,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         _categoryIdMap.clear();
         _categoryColors.clear();
 
-        // Update category colors and ID map
         for (var category in _expenseCategories) {
           _categoryColors[category['name']] = _parseColor(
             category['color'] ?? '#6B7280',
@@ -257,7 +256,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     try {
       final supabase = Supabase.instance.client;
 
-      // Start with the base query
       var query = supabase
           .from('expenses')
           .select('''
@@ -269,29 +267,21 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             )
           ''');
 
-      // Apply user filter
-      // Note: If your expenses table has user_id column, uncomment this
-      // query = query.eq('user_id', _userId);
-
-      // Apply date range filter
       if (_selectedDateRange != null) {
         query = query
             .gte('date_incurred', _selectedDateRange!.start.toIso8601String())
             .lte('date_incurred', _selectedDateRange!.end.toIso8601String());
       }
 
-      // Apply category filter
       if (_selectedCategory != 'All') {
         final categoryId = _categoryIdMap[_selectedCategory];
         if (categoryId != null && !categoryId.startsWith('temp-')) {
           query = query.eq('category_id', categoryId);
         } else {
-          // Fallback to category_name for temp categories
           query = query.eq('category_name', _selectedCategory);
         }
       }
 
-      // Apply payment method filter
       if (_selectedPaymentMethod != 'All') {
         query = query.eq(
           'payment_method',
@@ -299,19 +289,16 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         );
       }
 
-      // Apply business only filter
       if (_showBusinessOnly) {
         query = query.eq('is_business_expense', true);
       }
 
-      // Apply sorting and execute
       final response = await query.order('date_incurred', ascending: false);
 
       setState(() {
         _allExpenses = response.map<Map<String, dynamic>>((expense) {
           final category = expense['expense_categories'] as Map<String, dynamic>?;
 
-          // Determine category name with proper fallback
           String categoryName = 'Uncategorized';
           if (category != null && category['name'] != null) {
             categoryName = category['name'];
@@ -358,7 +345,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           .gte('date_incurred', sixMonthsAgo.toIso8601String())
           .order('date_incurred');
 
-      // Group by month
       final Map<String, double> monthlyTotals = {};
       for (var expense in response) {
         final date = DateTime.parse(expense['date_incurred']);
@@ -368,7 +354,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                 ((expense['amount'] as num?)?.toDouble() ?? 0);
       }
 
-      // Convert to list and sort
       final sortedMonths = monthlyTotals.entries.toList()
         ..sort((a, b) {
           try {
@@ -387,7 +372,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       });
     } catch (e) {
       print('Error loading monthly trend: $e');
-      // Keep existing data or set empty
       setState(() {
         _monthlyTrend = [];
       });
@@ -398,13 +382,11 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     try {
       final supabase = Supabase.instance.client;
 
-      // Calculate totals
       final totalExpenses = _allExpenses.fold<double>(
           0.0,
               (sum, e) => sum + (e['amount'] as double)
       );
 
-      // Get total earnings from invoices (you need to implement this based on your needs)
       final earningsResponse = await supabase
           .from('invoices')
           .select('amount')
@@ -417,7 +399,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       final currentBalance = totalEarnings - totalExpenses;
 
-      // Update or insert balance summary
       final existingBalance = await supabase
           .from('balance_summary')
           .select()
@@ -445,7 +426,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       }
     } catch (e) {
       print('Error updating balance summary: $e');
-      // Non-critical error, don't throw
     }
   }
 
@@ -559,6 +539,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       _showBusinessOnly = false;
       _selectedDateRange = null;
       _currentPage = 1;
+      _showFilterPanel = false;
     });
     _loadExpenses();
   }
@@ -567,11 +548,9 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     try {
       final supabase = Supabase.instance.client;
 
-      // Find category ID from the map
       String? categoryId;
       if (expenseData['category'] != null) {
         categoryId = _categoryIdMap[expenseData['category']];
-        // If it's a temp ID, don't use it in DB
         if (categoryId != null && categoryId.startsWith('temp-')) {
           categoryId = null;
         }
@@ -581,7 +560,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         'amount': expenseData['amount'],
         'description': expenseData['description'],
         'category_id': categoryId,
-        'category_name': expenseData['category'], // Keep as fallback
+        'category_name': expenseData['category'],
         'date_incurred': (expenseData['date'] as DateTime).toIso8601String(),
         'payment_method': expenseData['paymentMethod']?.toLowerCase() ?? 'cash',
         'vendor_name': expenseData['vendor'],
@@ -590,7 +569,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         'notes': expenseData['notes'],
         'receipt_number': expenseData['receiptNumber'],
         'tags': expenseData['tags'] ?? [],
-        // 'user_id': _userId, // Uncomment if your expenses table has user_id
       };
 
       await supabase.from('expenses').insert(expense);
@@ -629,11 +607,9 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     try {
       final supabase = Supabase.instance.client;
 
-      // Find category ID
       String? categoryId;
       if (expenseData['category'] != null) {
         categoryId = _categoryIdMap[expenseData['category']];
-        // If it's a temp ID, don't use it in DB
         if (categoryId != null && categoryId.startsWith('temp-')) {
           categoryId = null;
         }
@@ -751,17 +727,12 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     }
   }
 
-  // All the UI building methods remain exactly the same as in your original code
-  // I'm not including them here to keep the response manageable
-  // Just copy all the build methods from your original code exactly as they were
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF05060A),
       body: Stack(
         children: [
-          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -772,7 +743,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             ),
           ),
 
-          // Decorative blobs
           Positioned(
             top: -120,
             left: -100,
@@ -861,7 +831,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         children: [
           const SizedBox(height: 8),
 
-          // Title and subtitle
           const Text(
             "Expense Management",
             style: TextStyle(
@@ -880,50 +849,40 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           ),
           const SizedBox(height: 20),
 
-          // Stats cards
           _buildStatsGrid(),
           const SizedBox(height: 20),
 
-          // Monthly Expense Trend
           if (_monthlyTrend.isNotEmpty) _buildMonthlyTrend(),
           const SizedBox(height: 20),
 
-          // Category Breakdown
           if (categoryTotals.isNotEmpty) _buildCategoryBreakdown(),
           const SizedBox(height: 20),
 
-          // Income vs Expenses
           _buildIncomeVsExpenses(),
           const SizedBox(height: 20),
 
-          // Date Range Filter
-          _buildDateRangeFilter(),
-          const SizedBox(height: 16),
-
-          // Search and Filter Section
           _buildSearchAndFilterSection(),
           const SizedBox(height: 16),
 
-          // Search Summary
-          if (_searchQuery.isNotEmpty) _buildSearchSummary(),
-          const SizedBox(height: 16),
+          if (_showFilterPanel) _buildFilterPanel(),
+          if (_showFilterPanel) const SizedBox(height: 16),
 
-          // Expense count and actions
+          if (_searchQuery.isNotEmpty) _buildSearchSummary(),
+          if (_searchQuery.isNotEmpty) const SizedBox(height: 16),
+
           _buildExpenseHeader(),
           const SizedBox(height: 16),
 
-          // Expenses table
           _buildExpensesTable(),
           const SizedBox(height: 16),
 
-          // Pagination
           if (totalPages > 1) _buildPagination(),
         ],
       ),
     );
   }
 
-  Widget _buildDateRangeFilter() {
+  Widget _buildFilterPanel() {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1A1F2E).withOpacity(0.95),
@@ -935,6 +894,31 @@ class _ExpenseScreenState extends State<ExpenseScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Filter Options",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.close, color: Colors.white.withOpacity(0.7), size: 20),
+                  onPressed: () {
+                    setState(() {
+                      _showFilterPanel = false;
+                    });
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
             const Text(
               "Date Range",
               style: TextStyle(
@@ -949,128 +933,293 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               spacing: 8,
               runSpacing: 8,
               children: [
-                _buildPreset("All Time", null),
-                _buildPreset("Last 7 Days",
+                _buildFilterChip("All Time", null, _selectedDateRange == null),
+                _buildFilterChip("Last 7 Days",
                     DateTimeRange(
                       start: DateTime.now().subtract(const Duration(days: 7)),
                       end: DateTime.now(),
-                    )),
-                _buildPreset("Last Month",
+                    ), _selectedDateRange?.start == DateTime.now().subtract(const Duration(days: 7)).day),
+                _buildFilterChip("Last Month",
                     DateTimeRange(
                       start: DateTime.now().subtract(const Duration(days: 30)),
                       end: DateTime.now(),
-                    )),
-                _buildPreset("Last 3 Months",
+                    ), _selectedDateRange?.start == DateTime.now().subtract(const Duration(days: 30)).day),
+                _buildFilterChip("Last 3 Months",
                     DateTimeRange(
                       start: DateTime.now().subtract(const Duration(days: 90)),
                       end: DateTime.now(),
-                    )),
-                _buildPreset("Last Year",
-                    DateTimeRange(
-                      start: DateTime.now().subtract(const Duration(days: 365)),
-                      end: DateTime.now(),
-                    )),
-                _buildCustomDate(),
+                    ), _selectedDateRange?.start == DateTime.now().subtract(const Duration(days: 90)).day),
+                _buildCustomDateChip(),
               ],
-            )
+            ),
+            const SizedBox(height: 20),
+
+            const Text(
+              "Category",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildCategoryChip("All", "All", _selectedCategory == 'All'),
+                ..._expenseCategories.map((category) {
+                  return _buildCategoryChip(
+                    category['name'],
+                    category['name'],
+                    _selectedCategory == category['name'],
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            const Text(
+              "Payment Method",
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildPaymentChip("All", "All", _selectedPaymentMethod == 'All'),
+                _buildPaymentChip("Cash", "Cash", _selectedPaymentMethod == 'Cash'),
+                _buildPaymentChip("UPI", "UPI", _selectedPaymentMethod == 'UPI'),
+                _buildPaymentChip("Credit Card", "Credit Card", _selectedPaymentMethod == 'Credit Card'),
+                _buildPaymentChip("Net Banking", "Net Banking", _selectedPaymentMethod == 'Net Banking'),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            Row(
+              children: [
+                Expanded(
+                  child: _buildTypeChip(
+                    "All Expenses",
+                    false,
+                    !_showBusinessOnly,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildTypeChip(
+                    "Business Only",
+                    true,
+                    _showBusinessOnly,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _clearAllFilters,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(color: Colors.white.withOpacity(0.3)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text("Reset All"),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _showFilterPanel = false;
+                      });
+                      _loadExpenses();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5B8CFF),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text("Apply Filters"),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildPreset(String label, DateTimeRange? range) {
-    bool active = _selectedDateRange == range ||
-        (range == null && _selectedDateRange == null);
-
-    return GestureDetector(
-      onTap: () {
+  Widget _buildFilterChip(String label, DateTimeRange? range, bool isSelected) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected ? Colors.white : Colors.black,
+          fontSize: 12,
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      selected: isSelected,
+      onSelected: (selected) {
         setState(() {
           _selectedDateRange = range;
           _currentPage = 1;
         });
-        _loadExpenses();
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active
-              ? const Color(0xFF5B8CFF).withOpacity(0.4)
-              : Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: active
-                ? const Color(0xFF5B8CFF)
-                : Colors.white.withOpacity(0.2),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? Colors.white : Colors.white70,
-            fontSize: 12,
-          ),
-        ),
+      backgroundColor: Colors.white.withOpacity(0.1),
+      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: isSelected ? const Color(0xFF5B8CFF) : Colors.white.withOpacity(0.2),
       ),
     );
   }
 
-  Widget _buildCustomDate() {
-    return GestureDetector(
-      onTap: _selectDateRange,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withOpacity(0.2)),
-        ),
-        child: const Text(
-          "Custom",
-          style: TextStyle(color: Colors.white70, fontSize: 12),
+  Widget _buildCustomDateChip() {
+    return FilterChip(
+      label: Text(
+        _selectedDateRange != null &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 7)) &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 30)) &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 90))
+            ? "${DateFormat('dd/MM').format(_selectedDateRange!.start)}-${DateFormat('dd/MM').format(_selectedDateRange!.end)}"
+            : "Custom",
+        style: TextStyle(
+          color: _selectedDateRange != null ? Colors.white : Colors.black,
+          fontSize: 12,
         ),
       ),
-    );
-  }
-
-
-  Future<void> _selectDateRange() async {
-    final DateTimeRange? picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-      initialDateRange: _selectedDateRange,
-      builder: (context, child) {
-        return Theme(
-          data: ThemeData.dark().copyWith(
-            colorScheme: const ColorScheme.dark(
-              primary: Color(0xFF5B8CFF),
-              onPrimary: Colors.white,
-              surface: Color(0xFF1A1F2E),
-              onSurface: Colors.white,
-            ),
-          ),
-          child: child!,
+      selected: _selectedDateRange != null &&
+          _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 7)) &&
+          _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 30)) &&
+          _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 90)),
+      onSelected: (selected) async {
+        final DateTimeRange? picked = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2100),
+          initialDateRange: _selectedDateRange,
+          builder: (context, child) {
+            return Theme(
+              data: ThemeData.dark().copyWith(
+                colorScheme: const ColorScheme.dark(
+                  primary: Color(0xFF5B8CFF),
+                  onPrimary: Colors.white,
+                  surface: Color(0xFF1A1F2E),
+                  onSurface: Colors.white,
+                ),
+              ),
+              child: child!,
+            );
+          },
         );
-      },
-    );
 
-    if (!mounted) return;
-
-    if (picked != null) {
-      setState(() {
-        if (_selectedDateRange != null &&
-            _selectedDateRange!.start == picked.start &&
-            _selectedDateRange!.end == picked.end) {
-          _selectedDateRange = null;
-        } else {
-          _selectedDateRange = picked;
+        if (picked != null) {
+          setState(() {
+            _selectedDateRange = picked;
+            _currentPage = 1;
+          });
         }
-        _currentPage = 1;
-      });
+      },
+      backgroundColor: Colors.white.withOpacity(0.1),
+      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: _selectedDateRange != null &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 7)) &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 30)) &&
+            _selectedDateRange!.start != DateTime.now().subtract(const Duration(days: 90))
+            ? const Color(0xFF5B8CFF)
+            : Colors.white.withOpacity(0.2),
+      ),
+    );
+  }
 
-      await _loadExpenses();
-    }
+  Widget _buildCategoryChip(String label, String value, bool isSelected) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected ? Colors.white : Colors.black,
+          fontSize: 12,
+        ),
+      ),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _selectedCategory = selected ? value : 'All';
+          _currentPage = 1;
+        });
+      },
+      backgroundColor: Colors.white.withOpacity(0.1),
+      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: isSelected ? const Color(0xFF5B8CFF) : Colors.white.withOpacity(0.2),
+      ),
+    );
+  }
+
+  Widget _buildPaymentChip(String label, String value, bool isSelected) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected ? Colors.white : Colors.black,
+          fontSize: 12,
+        ),
+      ),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _selectedPaymentMethod = selected ? value : 'All';
+          _currentPage = 1;
+        });
+      },
+      backgroundColor: Colors.white.withOpacity(0.1),
+      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: isSelected ? const Color(0xFF5B8CFF) : Colors.white.withOpacity(0.2),
+      ),
+    );
+  }
+
+  Widget _buildTypeChip(String label, bool value, bool isSelected) {
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: isSelected ? Colors.white : Colors.black,
+          fontSize: 12,
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+        ),
+      ),
+      selected: isSelected,
+      onSelected: (selected) {
+        setState(() {
+          _showBusinessOnly = value;
+          _currentPage = 1;
+        });
+      },
+      backgroundColor: Colors.white.withOpacity(0.1),
+      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: isSelected ? const Color(0xFF5B8CFF) : Colors.white.withOpacity(0.2),
+      ),
+    );
   }
 
   Widget _buildSearchSummary() {
@@ -1372,18 +1521,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                     final month = data['month'] as String;
                     final expense = data['expenses'] as double;
 
-                    // Calculate height with proper type casting
                     double barHeight = 0;
                     if (maxExpense > 0) {
                       barHeight = (expense / maxExpense) * 100;
                     }
 
-                    // Ensure minimum height of 4px for visibility with proper double conversion
                     double displayHeight = barHeight;
                     if (barHeight < 4 && barHeight > 0) {
                       displayHeight = 4.0;
                     }
-                    // Clamp to max 100 and ensure it's a double
                     if (displayHeight > 100) {
                       displayHeight = 100.0;
                     }
@@ -1395,7 +1541,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           mainAxisAlignment: MainAxisAlignment.end,
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            // Bar container with proper constraints
                             Container(
                               height: displayHeight,
                               decoration: BoxDecoration(
@@ -1413,7 +1558,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               ),
                             ),
                             const SizedBox(height: 8),
-                            // Month label
                             Text(
                               month.split(' ')[0],
                               style: TextStyle(
@@ -1431,7 +1575,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                 ),
               ),
               const SizedBox(height: 12),
-              // Month names row
               SizedBox(
                 height: 20,
                 child: ListView.builder(
@@ -1608,7 +1751,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 16),
 
-              // Legend
               Row(
                 children: [
                   _buildLegendItem("Income", const Color(0xFF22C55E)),
@@ -1618,7 +1760,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 20),
 
-              // Months header
               Row(
                 children: [
                   const Expanded(
@@ -1661,7 +1802,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 12),
 
-              // Income row
               _buildComparisonRow(
                 label: "Income",
                 amount1: _totalExpenses * 1.3,
@@ -1670,7 +1810,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 12),
 
-              // Expenses row
               _buildComparisonRow(
                 label: "Expenses",
                 amount1: _totalExpenses,
@@ -1679,7 +1818,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 20),
 
-              // Net Profit and Margin
               Row(
                 children: [
                   Expanded(
@@ -1841,7 +1979,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Search row with filter button
                 Row(
                   children: [
                     Expanded(
@@ -1855,9 +1992,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                         ),
                         child: Focus(
-                          onFocusChange: (hasFocus) {
-                            // No need to rebuild, just let the TextField handle it
-                          },
+                          onFocusChange: (hasFocus) {},
                           child: TextField(
                             controller: _searchController,
                             style: const TextStyle(
@@ -1897,7 +2032,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       ),
                     ),
                     const SizedBox(width: 8),
-                    // Filter button
                     Container(
                       height: 44,
                       decoration: BoxDecoration(
@@ -1917,24 +2051,43 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       child: Material(
                         color: Colors.transparent,
                         child: InkWell(
-                          onTap: _openFilterDialog,
+                          onTap: () {
+                            setState(() {
+                              _showFilterPanel = !_showFilterPanel;
+                            });
+                          },
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                             child: Row(
                               children: [
                                 Icon(
-                                  Icons.filter_list,
+                                  Icons.tune,
                                   size: 18,
-                                  color: hasActiveFilters
+                                  color: _showFilterPanel
                                       ? const Color(0xFF5B8CFF)
-                                      : Colors.white.withOpacity(0.7),
+                                      : (hasActiveFilters
+                                      ? const Color(0xFF5B8CFF)
+                                      : Colors.white.withOpacity(0.7)),
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  "Filter",
+                                  style: TextStyle(
+                                    color: _showFilterPanel
+                                        ? const Color(0xFF5B8CFF)
+                                        : (hasActiveFilters
+                                        ? const Color(0xFF5B8CFF)
+                                        : Colors.white.withOpacity(0.7)),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
                                 if (hasActiveFilters) ...[
                                   const SizedBox(width: 4),
                                   Container(
-                                    width: 6,
-                                    height: 6,
+                                    width: 8,
+                                    height: 8,
                                     decoration: const BoxDecoration(
                                       color: Color(0xFF5B8CFF),
                                       shape: BoxShape.circle,
@@ -1950,8 +2103,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                   ],
                 ),
 
-                // Active filters chips
-                if (hasActiveFilters) ...[
+                if (hasActiveFilters && !_showFilterPanel) ...[
                   const SizedBox(height: 12),
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -2014,7 +2166,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               },
                             ),
                           ),
-                        // Clear all button
                         if (hasActiveFilters)
                           Container(
                             margin: const EdgeInsets.only(left: 4),
@@ -2083,324 +2234,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           ),
         ],
       ),
-    );
-  }
-
-  void _openFilterDialog() {
-    String tempCategory = _selectedCategory;
-    String tempPaymentMethod = _selectedPaymentMethod;
-    bool tempBusinessOnly = _showBusinessOnly;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.7),
-      builder: (_) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              height: MediaQuery.of(context).size.height * 0.7,
-              decoration: const BoxDecoration(
-                color: Color(0xFF1A1F2E),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              child: Column(
-                children: [
-                  // Header
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: Colors.white.withOpacity(0.1),
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          "Filter Expenses",
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.close,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Body
-                  Expanded(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Category Section
-                          const Text(
-                            "Category",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildDialogFilterChip(
-                                label: "All",
-                                selected: tempCategory == 'All',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempCategory = 'All';
-                                  });
-                                },
-                              ),
-                              ..._expenseCategories.map((category) {
-                                return _buildDialogFilterChip(
-                                  label: category['name'],
-                                  selected: tempCategory == category['name'],
-                                  onSelected: (selected) {
-                                    setModalState(() {
-                                      tempCategory = selected
-                                          ? category['name']
-                                          : 'All';
-                                    });
-                                  },
-                                );
-                              }),
-                            ],
-                          ),
-
-                          const SizedBox(height: 24),
-
-                          // Payment Method Section
-                          const Text(
-                            "Payment Method",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              _buildDialogFilterChip(
-                                label: "All",
-                                selected: tempPaymentMethod == 'All',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempPaymentMethod = 'All';
-                                  });
-                                },
-                              ),
-                              _buildDialogFilterChip(
-                                label: "Cash",
-                                selected: tempPaymentMethod == 'Cash',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempPaymentMethod = selected
-                                        ? 'Cash'
-                                        : 'All';
-                                  });
-                                },
-                              ),
-                              _buildDialogFilterChip(
-                                label: "UPI",
-                                selected: tempPaymentMethod == 'UPI',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempPaymentMethod = selected
-                                        ? 'UPI'
-                                        : 'All';
-                                  });
-                                },
-                              ),
-                              _buildDialogFilterChip(
-                                label: "Credit Card",
-                                selected: tempPaymentMethod == 'Credit Card',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempPaymentMethod = selected
-                                        ? 'Credit Card'
-                                        : 'All';
-                                  });
-                                },
-                              ),
-                              _buildDialogFilterChip(
-                                label: "Net Banking",
-                                selected: tempPaymentMethod == 'Net Banking',
-                                onSelected: (selected) {
-                                  setModalState(() {
-                                    tempPaymentMethod = selected
-                                        ? 'Net Banking'
-                                        : 'All';
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 24),
-
-                          // Expense Type Section
-                          const Text(
-                            "Expense Type",
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _buildDialogFilterChip(
-                                  label: "All Expenses",
-                                  selected: !tempBusinessOnly,
-                                  onSelected: (selected) {
-                                    setModalState(() {
-                                      tempBusinessOnly = false;
-                                    });
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _buildDialogFilterChip(
-                                  label: "Business Only",
-                                  selected: tempBusinessOnly,
-                                  onSelected: (selected) {
-                                    setModalState(() {
-                                      tempBusinessOnly = true;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // Footer
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        top: BorderSide(color: Colors.white.withOpacity(0.1)),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            onPressed: () {
-                              setModalState(() {
-                                tempCategory = 'All';
-                                tempPaymentMethod = 'All';
-                                tempBusinessOnly = false;
-                              });
-                            },
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                            child: Text(
-                              "Reset",
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.7),
-                                fontSize: 16,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: () {
-                              setState(() {
-                                _selectedCategory = tempCategory;
-                                _selectedPaymentMethod = tempPaymentMethod;
-                                _showBusinessOnly = tempBusinessOnly;
-                                _currentPage = 1;
-                              });
-                              Navigator.pop(context);
-                              _loadExpenses();
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF5B8CFF),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                            child: const Text(
-                              "Apply Filters",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildDialogFilterChip({
-    required String label,
-    required bool selected,
-    required Function(bool) onSelected,
-  }) {
-    return FilterChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          fontSize: 13,
-          color: selected ? Colors.white : Colors.white.withOpacity(0.8),
-          fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-        ),
-      ),
-      selected: selected,
-      onSelected: onSelected,
-      backgroundColor: Colors.white.withOpacity(0.1),
-      selectedColor: const Color(0xFF5B8CFF).withOpacity(0.4),
-      checkmarkColor: Colors.white,
-      side: BorderSide(
-        color: selected
-            ? const Color(0xFF5B8CFF).withOpacity(0.6)
-            : Colors.white.withOpacity(0.2),
-        width: 1,
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
   }
 
@@ -2507,19 +2340,27 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             dataRowColor: WidgetStateProperty.all(Colors.transparent),
             columnSpacing: 30,
             headingTextStyle: const TextStyle(
-              color: Colors.white70,
-              fontWeight: FontWeight.w600,
-              fontSize: 12,
+              color: Color(0xFF5B8CFF),
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+              letterSpacing: 0.5,
             ),
             dataTextStyle: const TextStyle(color: Colors.white, fontSize: 12),
-            columns: const [
-              DataColumn(label: Text("DATE")),
-              DataColumn(label: Text("DESCRIPTION")),
-              DataColumn(label: Text("CATEGORY")),
-              DataColumn(label: Text("AMOUNT")),
-              DataColumn(label: Text("PAYMENT")),
-              DataColumn(label: Text("ACTIONS")),
-            ],
+            columns: _tableHeaders.map((header) {
+              return DataColumn(
+                label: Row(
+                  children: [
+                    Icon(
+                      header['icon'] as IconData,
+                      size: 14,
+                      color: const Color(0xFF5B8CFF),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(header['label'] as String),
+                  ],
+                ),
+              );
+            }).toList(),
             rows: paginatedExpenses.map((expense) {
               return DataRow(
                 cells: [
@@ -2673,7 +2514,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       text: isEditing ? existingExpense['notes'] : '',
     );
 
-    // Get unique category names
     final uniqueCategoryNames = _expenseCategories
         .map((e) => e['name'] as String)
         .toSet()
@@ -2681,7 +2521,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
     String? selectedCategory = isEditing ? existingExpense['category'] : null;
 
-    // Verify the selected category exists in unique list
     if (selectedCategory != null && !uniqueCategoryNames.contains(selectedCategory)) {
       selectedCategory = null;
     }
@@ -2725,7 +2564,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header
                           Row(
                             children: [
                               Expanded(
@@ -2767,7 +2605,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                           const SizedBox(height: 24),
 
-                          // Date and Amount row
                           Row(
                             children: [
                               Expanded(
@@ -2820,7 +2657,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                           const SizedBox(height: 16),
 
-                          // Category and Payment Method row
                           Row(
                             children: [
                               Expanded(
@@ -2884,21 +2720,18 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                           const SizedBox(height: 16),
 
-                          // Description
                           _buildModalInput(
                             controller: descriptionController,
                             hint: "Description *",
                           ),
                           const SizedBox(height: 16),
 
-                          // Vendor
                           _buildModalInput(
                             controller: vendorController,
                             hint: "Vendor/Supplier (Optional)",
                           ),
                           const SizedBox(height: 16),
 
-                          // Notes
                           _buildModalInput(
                             controller: notesController,
                             hint: "Additional Notes (Optional)",
@@ -2906,7 +2739,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                           const SizedBox(height: 20),
 
-                          // Checkboxes
                           Row(
                             children: [
                               _buildModalCheckbox(
@@ -2932,7 +2764,6 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                           ),
                           const SizedBox(height: 30),
 
-                          // Buttons
                           Row(
                             children: [
                               Expanded(
@@ -3102,10 +2933,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     required String? value,
     required ValueChanged<String?> onChanged,
   }) {
-    // Remove duplicates from items list
     final uniqueItems = items.toSet().toList();
 
-    // Ensure the current value exists in the unique items list
     String? currentValue = value;
     if (currentValue != null && !uniqueItems.contains(currentValue)) {
       currentValue = null;
@@ -3226,10 +3055,8 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
   String _formatAmount(double amount) {
     if (amount >= 10000000) {
-      // 1 Crore+
       return '${(amount / 10000000).toStringAsFixed(1)}Cr';
     } else if (amount >= 100000) {
-      // 1 Lakh+
       return '${(amount / 100000).toStringAsFixed(1)}L';
     } else if (amount >= 1000) {
       return '${(amount / 1000).toStringAsFixed(1)}K';

@@ -31,10 +31,19 @@ class ClientModel {
   String get displayId => id != null && id!.length >= 8 
       ? id!.substring(0, 8).toUpperCase() 
       : id?.toUpperCase() ?? '';
-  
-  String get initials => name.isNotEmpty 
-      ? name.split(' ').map((e) => e[0]).take(2).join().toUpperCase()
-      : '??';
+
+  String get initials {
+    if (name.trim().isEmpty) return "?";
+
+    final parts = name.trim().split(" ");
+
+    if (parts.length == 1) {
+      return parts[0][0].toUpperCase();
+    }
+
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
   
   bool get isVip => totalAmount >= 150000;
   bool get isDormant => lastInvoiceDate != null 
@@ -105,11 +114,16 @@ class ClientModel {
     DateTime? lastPaymentDate;
     
     if (json['invoices'] != null && json['invoices'] is List) {
-      invoices = List<Map<String, dynamic>>.from(json['invoices']);
+      invoices = (json['invoices'] as List)
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
 
       for (var invoice in invoices) {
 
-        double amount = double.tryParse(invoice['amount'].toString()) ?? 0;
+        double amount = (invoice['amount'] is num)
+            ? (invoice['amount'] as num).toDouble()
+            : double.tryParse(invoice['amount']?.toString() ?? "0") ?? 0;
+
         totalAmount += amount;
 
         String status = invoice['status']?.toString().toLowerCase() ?? '';

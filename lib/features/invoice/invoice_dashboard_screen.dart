@@ -17,7 +17,6 @@ class InvoiceDashboardScreen extends StatefulWidget {
   State<InvoiceDashboardScreen> createState() => _InvoiceDashboardScreenState();
 }
 
-
 class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
   static const double _headerHeight = 56;
   final TextEditingController _searchController = TextEditingController();
@@ -34,6 +33,13 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
   DateTimeRange? _selectedDateRange;
   bool _sortAscending = true;
   int _sortColumnIndex = 0;
+
+  String _selectedClientFilter = "All";
+  List<String> _clientList = ["All"];
+
+  double _minAmount = 0;
+  double _maxAmount = 1000000;
+  RangeValues _amountRange = const RangeValues(0, 1000000);
 
   final SupabaseService _supabase = SupabaseService();
 
@@ -63,17 +69,27 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
 
       if (mounted) {
         setState(() {
-
           _invoices = List<Map<String, dynamic>>.from(invoices);
           _stats = stats;
 
-          // extract unique statuses from DB
           final statuses = invoices
               .map((e) => e['status'].toString())
               .toSet()
               .toList();
-
           _statusList = ["All", ...statuses];
+
+          final clients = invoices
+              .map((e) => e['client_name'].toString())
+              .toSet()
+              .toList();
+          _clientList = ["All", ...clients];
+
+          if (invoices.isNotEmpty) {
+            final amounts = invoices.map((e) => (e['amount'] as num).toDouble()).toList();
+            _minAmount = amounts.reduce((a, b) => a < b ? a : b);
+            _maxAmount = amounts.reduce((a, b) => a > b ? a : b);
+            _amountRange = RangeValues(_minAmount, _maxAmount);
+          }
 
           _isLoading = false;
           _isRefreshing = false;
@@ -177,23 +193,17 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
   }
 
   List<Map<String, dynamic>> get filteredInvoices {
-
     List<Map<String, dynamic>> data = _invoices;
 
-    // Search
     if (_searchQuery.isNotEmpty) {
       data = data.where((inv) {
-
         final id = inv['id']?.toString().toLowerCase() ?? "";
         final client = inv['client_name']?.toString().toLowerCase() ?? "";
-
         return id.contains(_searchQuery.toLowerCase()) ||
             client.contains(_searchQuery.toLowerCase());
-
       }).toList();
     }
 
-    // Status filter
     if (_selectedStatus != "All") {
       data = data.where((inv) =>
       inv['status'].toString().toLowerCase() ==
@@ -201,18 +211,24 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
       ).toList();
     }
 
-    // Date filter
     if (_selectedDateRange != null) {
-
       data = data.where((inv) {
-
         DateTime issueDate = DateTime.parse(inv['date_issued']);
-
         return issueDate.isAfter(_selectedDateRange!.start) &&
             issueDate.isBefore(_selectedDateRange!.end);
-
       }).toList();
     }
+
+    if (_selectedClientFilter != "All") {
+      data = data.where((inv) =>
+      inv['client_name'] == _selectedClientFilter
+      ).toList();
+    }
+
+    data = data.where((inv) {
+      final amount = (inv['amount'] as num).toDouble();
+      return amount >= _amountRange.start && amount <= _amountRange.end;
+    }).toList();
 
     return data;
   }
@@ -235,13 +251,406 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
     return '₹${amount.toStringAsFixed(2)}';
   }
 
+  void _showFilterDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.85,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1F2E),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: Column(
+                children: [
+
+                  /// HEADER
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                          bottom: BorderSide(color: Colors.white.withOpacity(0.1))),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Filter Invoices',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  /// BODY
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+
+                          /// STATUS
+                          const Text(
+                            'Status',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _statusList.map((status) {
+                              final isSelected = _selectedStatus == status;
+
+                              return GestureDetector(
+                                onTap: () {
+                                  setModalState(() {
+                                    _selectedStatus = status;
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? const Color(0xFF5B8CFF)
+                                        : Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? Colors.transparent
+                                          : Colors.white.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    status,
+                                    style: TextStyle(
+                                      color:
+                                      isSelected ? Colors.white : Colors.white70,
+                                      fontWeight: isSelected
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          /// CLIENT
+                          const Text(
+                            'Client',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border:
+                              Border.all(color: Colors.white.withOpacity(0.2)),
+                            ),
+                            child: DropdownButton<String>(
+                              value: _selectedClientFilter,
+                              dropdownColor: const Color(0xFF1A1F2E),
+                              underline: const SizedBox(),
+                              isExpanded: true,
+                              items: _clientList.map((client) {
+                                return DropdownMenuItem(
+                                  value: client,
+                                  child: Text(
+                                    client,
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                setModalState(() {
+                                  _selectedClientFilter = val!;
+                                });
+                              },
+                            ),
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          /// DATE RANGE
+                          const Text(
+                            'Date Range',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _buildFilterDateChip(
+                                  'Today', 0, setModalState),
+                              _buildFilterDateChip(
+                                  '7 Days', 7, setModalState),
+                              _buildFilterDateChip(
+                                  '30 Days', 30, setModalState),
+                              _buildFilterDateChip(
+                                  '90 Days', 90, setModalState),
+                              _buildFilterDateChip(
+                                  'This Year', 365, setModalState),
+
+                              /// CUSTOM DATE
+                              GestureDetector(
+                                onTap: () async {
+                                  DateTimeRange? range = await _pickDateRange();
+
+                                  if (range != null) {
+                                    setModalState(() {
+                                      _selectedDateRange = range;
+                                    });
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: _selectedDateRange != null
+                                        ? const Color(0xFF5B8CFF)
+                                        : Colors.white.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: _selectedDateRange != null
+                                          ? Colors.transparent
+                                          : Colors.white.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _selectedDateRange != null
+                                        ? '${DateFormat('dd/MM').format(_selectedDateRange!.start)} - ${DateFormat('dd/MM').format(_selectedDateRange!.end)}'
+                                        : 'Custom',
+                                    style: TextStyle(
+                                      color: _selectedDateRange != null
+                                          ? Colors.white
+                                          : Colors.white70,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          /// AMOUNT RANGE
+                          const Text(
+                            'Amount Range',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          RangeSlider(
+                            values: _amountRange,
+                            min: _minAmount,
+                            max: _maxAmount,
+                            divisions: 100,
+                            activeColor: const Color(0xFF5B8CFF),
+                            inactiveColor: Colors.white.withOpacity(0.2),
+                            labels: RangeLabels(
+                              _formatCurrency(_amountRange.start),
+                              _formatCurrency(_amountRange.end),
+                            ),
+                            onChanged: (values) {
+                              setModalState(() {
+                                _amountRange = values;
+                              });
+                            },
+                          ),
+
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                _formatCurrency(_amountRange.start),
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12),
+                              ),
+                              Text(
+                                _formatCurrency(_amountRange.end),
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  /// FOOTER
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                          top: BorderSide(color: Colors.white.withOpacity(0.1))),
+                    ),
+                    child: Row(
+                      children: [
+
+                        /// RESET
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () {
+                              setModalState(() {
+                                _selectedStatus = "All";
+                                _selectedClientFilter = "All";
+                                _selectedDateRange = null;
+                                _amountRange =
+                                    RangeValues(_minAmount, _maxAmount);
+                              });
+                            },
+                            child: const Text(
+                              'Reset',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(width: 12),
+
+                        /// APPLY
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(context);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF5B8CFF),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Apply Filters',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<DateTimeRange?> _pickDateRange() async {
+    return await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      initialDateRange: _selectedDateRange,
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData.dark().copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF5B8CFF),
+              onPrimary: Colors.white,
+              surface: Color(0xFF1A1F2E),
+              onSurface: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+  }
+
+  Widget _buildFilterDateChip(
+      String label, int days, StateSetter setModalState) {
+
+    final now = DateTime.now();
+    final startDate = now.subtract(Duration(days: days));
+
+    final isSelected = _selectedDateRange != null &&
+        _selectedDateRange!.start == startDate &&
+        _selectedDateRange!.end == now;
+
+    return GestureDetector(
+      onTap: () {
+        setModalState(() {
+          _selectedDateRange = DateTimeRange(
+            start: startDate,
+            end: now,
+          );
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF5B8CFF)
+              : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color:
+            isSelected ? Colors.transparent : Colors.white.withOpacity(0.2),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.white70,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF05060A),
       body: Stack(
         children: [
-          // Background gradient
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -251,8 +660,6 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               ),
             ),
           ),
-
-          // Decorative blobs
           Positioned(
             top: -120,
             left: -100,
@@ -273,8 +680,6 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               opacity: 0.26,
             ),
           ),
-
-          // Main content
           SafeArea(
             child: Column(
               children: [
@@ -305,7 +710,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
                           const SizedBox(height: 24),
                           _buildInvoicesHeader(),
                           const SizedBox(height: 16),
-                          _buildInvoiceFilters(),
+                          _buildSearchAndFilter(),
                           const SizedBox(height: 20),
                           _buildInvoicesTable(),
                         ],
@@ -321,185 +726,39 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
     );
   }
 
-  Widget _buildInvoiceFilters() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-
-        /// SEARCH (FULL WIDTH)
-        _buildSearchBar(),
-
-        const SizedBox(height: 14),
-
-        /// DATE RANGE CHIPS
-        _buildDateFilters(),
-
-        const SizedBox(height: 14),
-
-        /// STATUS SELECT
-        _buildStatusDropdown(),
-      ],
-    );
-  }
-
-  Widget _buildDateFilters() {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 8,
-      children: [
-
-        _dateChip("1M", 30),
-        _dateChip("3M", 90),
-        _dateChip("6M", 180),
-        _dateChip("12M", 365),
-
-        GestureDetector(
-          onTap: _pickDateRange,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
-            ),
-            child: const Text(
-              "Custom",
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        )
-      ],
-    );
-  }
-
-  Widget _dateChip(String label, int days) {
-
-    final now = DateTime.now();
-
-    bool active = _selectedDateRange != null &&
-        _selectedDateRange!.start == now.subtract(Duration(days: days));
-
-    return GestureDetector(
-      onTap: () {
-
-        setState(() {
-          _selectedDateRange = DateTimeRange(
-            start: now.subtract(Duration(days: days)),
-            end: now,
-          );
-        });
-
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? const Color(0xFF5B8CFF)
-              : Colors.white.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withOpacity(0.1)),
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildStatusDropdown() {
+  Widget _buildSearchAndFilter() {
     return Row(
       children: [
-
-        const Text(
-          "Status:",
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 13,
-            fontWeight: FontWeight.w500,
-          ),
+        Expanded(
+          child: _buildSearchBar(),
         ),
-
         const SizedBox(width: 12),
-
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.white.withOpacity(0.1)),
-          ),
-          child: DropdownButton<String>(
-            value: _selectedStatus,
-            dropdownColor: const Color(0xFF1A1F2E),
-            underline: const SizedBox(),
-
-            items: _statusList.map((e) {
-              return DropdownMenuItem(
-                value: e,
-                child: Text(
-                  e,
-                  style: const TextStyle(color: Colors.white),
-                ),
-              );
-            }).toList(),
-
-            onChanged: (val) {
-              setState(() {
-                _selectedStatus = val!;
-              });
-            },
-          )
-        )
-      ],
-    );
-  }
-
-  Future<void> _pickDateRange() async {
-
-    final picked = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-
-    if (picked != null) {
-      setState(() {
-        _selectedDateRange = picked;
-      });
-    }
-  }
-
-  Widget _glassContainer({required Widget child}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            gradient: LinearGradient(
-              colors: [
-                Colors.white.withOpacity(0.12),
-                Colors.white.withOpacity(0.05)
-              ],
+        GestureDetector(
+          onTap: _showFilterDialog,
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF5B8CFF).withOpacity(0.2),
+                  const Color(0xFF5B8CFF).withOpacity(0.1),
+                ],
+              ),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFF5B8CFF).withOpacity(0.3),
+                width: 1.5,
+              ),
             ),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.08),
+            child: const Icon(
+              Icons.filter_list,
+              color: Color(0xFF5B8CFF),
+              size: 20,
             ),
           ),
-          child: child,
         ),
-      ),
+      ],
     );
   }
 
@@ -570,7 +829,6 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-
           SizedBox(
             width: 120,
             child: _buildStatCard(
@@ -580,9 +838,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               color: const Color(0xFF5B8CFF),
             ),
           ),
-
           const SizedBox(width: 12),
-
           SizedBox(
             width: 120,
             child: _buildStatCard(
@@ -592,9 +848,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               color: const Color(0xFF22C55E),
             ),
           ),
-
           const SizedBox(width: 12),
-
           SizedBox(
             width: 120,
             child: _buildStatCard(
@@ -604,9 +858,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               color: const Color(0xFFEF4444),
             ),
           ),
-
           const SizedBox(width: 12),
-
           SizedBox(
             width: 120,
             child: _buildStatCard(
@@ -616,9 +868,7 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
               color: const Color(0xFF6B7280),
             ),
           ),
-
           const SizedBox(width: 12),
-
           SizedBox(
             width: 120,
             child: _buildStatCard(
@@ -801,50 +1051,60 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
   }
 
   void _exportInvoices() {
-
     final data = filteredInvoices;
-
     showModalBottomSheet(
       context: context,
+      backgroundColor: Colors.transparent,
       builder: (context) {
-
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf),
-              title: const Text("Export PDF"),
-              onTap: () {
-                Navigator.pop(context);
-                exportPDF(data);
-              },
-            ),
-
-            ListTile(
-              leading: const Icon(Icons.table_chart),
-              title: const Text("Export Excel"),
-              onTap: () {
-                Navigator.pop(context);
-                exportExcel(data);
-              },
-            ),
-
-          ],
+        return Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1F2E),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.picture_as_pdf, color: Color(0xFFEF4444)),
+                ),
+                title: const Text(
+                  "Export PDF",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  exportPDF(data);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF22C55E).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.table_chart, color: Color(0xFF22C55E)),
+                ),
+                title: const Text(
+                  "Export Excel",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  exportExcel(data);
+                },
+              ),
+            ],
+          ),
         );
       },
-    );
-  }
-
-  Widget _buildExportOption({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return ListTile(
-      leading: Icon(icon, color: Colors.white70),
-      title: Text(label, style: const TextStyle(color: Colors.white)),
-      onTap: onTap,
     );
   }
 
@@ -938,503 +1198,234 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
     );
   }
 
-  Widget _buildStatusFilter() {
-    return Wrap(
-      spacing: 8,
-      children: [
-        _filterChip("All"),
-        _filterChip("Paid"),
-        _filterChip("Draft"),
-        _filterChip("Overdue"),
-      ],
-    );
-  }
-
-  Widget _filterChip(String status) {
-    bool active = _selectedStatus == status;
-
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedStatus = status;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: active
-              ? const Color(0xFF5B8CFF)
-              : Colors.white.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          status,
-          style: const TextStyle(color: Colors.white, fontSize: 12),
-        ),
-      ),
-    );
-  }
-
   Widget _buildInvoicesTable() {
-
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
-          padding: const EdgeInsets.all(10),
-
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-
-            // TRANSPARENT GLASS BACKGROUND
             gradient: LinearGradient(
-              colors: [
-                Colors.white.withOpacity(0.05),
-                Colors.white.withOpacity(0.02),
-              ],
-            ),
-
-            border: Border.all(
-              color: Colors.white.withOpacity(0.08),
-            ),
-          ),
-
-          child: SizedBox(
-            height: 520,
-
-            child: DataTable2(
-
-              // remove material background
-              headingRowColor:
-              WidgetStateProperty.all(Colors.transparent),
-
-              dataRowColor:
-              WidgetStateProperty.all(Colors.transparent),
-
-              dividerThickness: 0.3,
-
-              columnSpacing: 14,
-              horizontalMargin: 10,
-              minWidth: 1500,
-
-              columns: const [
-
-                DataColumn2(
-                  label: Text(
-                    "Invoice",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Client",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Amount",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Status",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Issue Date",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Due Date",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-
-                DataColumn2(
-                  label: Text(
-                    "Actions",
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                ),
-              ],
-
-              rows: filteredInvoices.map((invoice) {
-
-                final issue = DateTime.parse(invoice['date_issued']);
-                final due = DateTime.parse(invoice['due_date']);
-
-                return DataRow(
-
-                  color: WidgetStateProperty.resolveWith<Color?>(
-                        (states) {
-
-                      if (states.contains(WidgetState.hovered)) {
-                        return Colors.white.withOpacity(0.05);
-                      }
-
-                      return Colors.transparent;
-                    },
-                  ),
-
-                  cells: [
-
-                    DataCell(
-                      Text(
-                        invoice['id'].toString(),
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ),
-
-                    DataCell(
-                      Text(
-                        invoice['client_name'] ?? "",
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ),
-
-                    DataCell(
-                      Text(
-                        _formatCurrency(
-                            (invoice['amount'] as num).toDouble()),
-                        style: const TextStyle(
-                          color: Color(0xFF5B8CFF),
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-
-                    DataCell(
-                      Text(
-                        invoice['status'],
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ),
-
-                    DataCell(
-                      Text(
-                        DateFormat('dd MMM yyyy').format(issue),
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ),
-
-                    DataCell(
-                      Text(
-                        DateFormat('dd MMM yyyy').format(due),
-                        style: const TextStyle(color: Colors.white70),
-                      ),
-                    ),
-
-                    DataCell(
-                      Row(
-                        children: [
-
-                          IconButton(
-                            icon: const Icon(Icons.visibility,
-                                color: Colors.white70),
-                            onPressed: () =>
-                                _viewInvoiceDetails(invoice),
-                          ),
-
-                          IconButton(
-                            icon: const Icon(Icons.edit,
-                                color: Colors.white70),
-                            onPressed: () =>
-                                _editInvoice(invoice),
-                          ),
-
-                          IconButton(
-                            icon: const Icon(Icons.delete,
-                                color: Colors.redAccent),
-                            onPressed: () =>
-                                _showDeleteDialog(
-                                    invoice['id'],
-                                    invoice['id']),
-                          ),
-
-                          if ((invoice['status'] ?? '').toString().toUpperCase() != "PAID")
-                            IconButton(
-                              icon: const Icon(
-                                Icons.check_circle,
-                                color: Color(0xFF22C55E),
-                              ),
-                              onPressed: () => _markAsPaid(invoice['id']),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                );
-
-              }).toList(),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildInvoiceCard(Map<String, dynamic> invoice) {
-    final issueDate = DateTime.parse(invoice['date_issued']);
-    final dueDate = DateTime.parse(invoice['due_date']);
-    final status = invoice['status']?.toString().toUpperCase() ?? 'DRAFT';
-    final now = DateTime.now();
-    final isOverdue = status != 'PAID' && dueDate.isBefore(now);
-
-    Color getStatusColor() {
-      if (status == 'PAID') return const Color(0xFF22C55E);
-      if (status == 'OVERDUE' || isOverdue) return const Color(0xFFEF4444);
-      if (status == 'DRAFT') return const Color(0xFF6B7280);
-      return const Color(0xFFF59E0B); // PENDING
-    }
-
-    String getStatusText() {
-      if (isOverdue && status != 'PAID') return 'OVERDUE';
-      return status;
-    }
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
               colors: [
                 Colors.white.withOpacity(0.08),
                 Colors.white.withOpacity(0.03),
               ],
             ),
             border: Border.all(
-              color: Colors.white.withOpacity(0.08),
-              width: 0.8,
+              color: Colors.white.withOpacity(0.12),
+              width: 1.2,
             ),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => _viewInvoiceDetails(invoice),
-              borderRadius: BorderRadius.circular(16),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    // Header row with invoice number and status
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                invoice['id']?.toString() ?? '',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                invoice['client_name']?.toString() ?? '',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.6),
-                                  fontSize: 12,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: getStatusColor().withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(
-                              color: getStatusColor().withOpacity(0.3),
-                            ),
-                          ),
-                          child: Text(
-                            getStatusText(),
-                            style: TextStyle(
-                              color: getStatusColor(),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    Wrap(
-                      spacing: 16,
-                      runSpacing: 8,
-                      alignment: WrapAlignment.spaceBetween,
-                      children: [
-
-                        /// AMOUNT
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Amount",
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _formatCurrency((invoice['amount'] as num?)?.toDouble() ?? 0),
-                              style: const TextStyle(
-                                color: Color(0xFF5B8CFF),
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        /// ISSUE DATE
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              "Issue Date",
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat('dd MMM yyyy').format(issueDate),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        /// DUE DATE
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              "Due Date",
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.5),
-                                fontSize: 10,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              DateFormat('dd MMM yyyy').format(dueDate),
-                              style: TextStyle(
-                                color: isOverdue && status != 'PAID'
-                                    ? const Color(0xFFEF4444)
-                                    : Colors.white,
-                                fontSize: 12,
-                                fontWeight: isOverdue && status != 'PAID'
-                                    ? FontWeight.w600
-                                    : FontWeight.normal,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // Action buttons
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if ((invoice['status'] ?? '').toString().toUpperCase() != "PAID")
-                          TextButton.icon(
-                            onPressed: () => _markAsPaid(invoice['id']),
-                            icon: const Icon(Icons.check_circle, size: 16, color: Color(0xFF22C55E)),
-                            label: const Text(
-                              "Mark Paid",
-                              style: TextStyle(color: Color(0xFF22C55E), fontSize: 12),
-                            ),
-                          ),
-
-                        const SizedBox(width: 8),
-                        TextButton.icon(
-                          onPressed: () => _editInvoice(invoice),
-                          icon: Icon(
-                            Icons.edit_outlined,
-                            size: 16,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                          label: Text(
-                            "Edit",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        TextButton.icon(
-                          onPressed: () => _showDeleteDialog(
-                            invoice['id'].toString(),
-                            invoice['id'].toString(),
-                          ),
-                          icon: Icon(
-                            Icons.delete_outline,
-                            size: 16,
-                            color: Colors.white.withOpacity(0.7),
-                          ),
-                          label: Text(
-                            "Delete",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 12,
-                            ),
-                          ),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF5B8CFF).withOpacity(0.2),
+                blurRadius: 20,
+                spreadRadius: 2,
               ),
+            ],
+          ),
+          child: SizedBox(
+            height: 520,
+            child: DataTable2(
+              columnSpacing: 16,
+              horizontalMargin: 12,
+              minWidth: 1400,
+              headingRowHeight: 50,
+              dataRowHeight: 56,
+              dividerThickness: 0.3,
+              headingRowColor:
+              WidgetStateProperty.all(const Color(0xFF5B8CFF).withOpacity(0.15)),
+              columns: const [
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.receipt, color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Invoice",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.person, color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Client",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.currency_rupee,
+                          color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Amount",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.flag, color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Status",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.calendar_today,
+                          color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Issue Date",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.event, color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Due Date",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+                DataColumn2(
+                  label: Row(
+                    children: [
+                      Icon(Icons.settings,
+                          color: Color(0xFF5B8CFF), size: 18),
+                      SizedBox(width: 6),
+                      Text("Actions",
+                          style: TextStyle(
+                              color: Color(0xFF5B8CFF),
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              ],
+              rows: filteredInvoices.map((invoice) {
+                final issue = DateTime.parse(invoice['date_issued']);
+                final due = DateTime.parse(invoice['due_date']);
+                final status = invoice['status'].toString().toLowerCase();
+
+                Color statusColor;
+
+                switch (status) {
+                  case 'paid':
+                    statusColor = const Color(0xFF22C55E);
+                    break;
+                  case 'pending':
+                    statusColor = const Color(0xFFF59E0B);
+                    break;
+                  case 'overdue':
+                    statusColor = const Color(0xFFEF4444);
+                    break;
+                  case 'draft':
+                    statusColor = const Color(0xFF6B7280);
+                    break;
+                  default:
+                    statusColor = Colors.white70;
+                }
+
+                return DataRow(
+                  color: WidgetStateProperty.resolveWith<Color?>((states) {
+                    if (states.contains(WidgetState.hovered)) {
+                      return const Color(0xFF5B8CFF).withOpacity(0.1);
+                    }
+                    return Colors.transparent;
+                  }),
+                  cells: [
+                    DataCell(Text(
+                      invoice['id'].toString(),
+                      style: const TextStyle(color: Colors.white),
+                    )),
+                    DataCell(Text(
+                      invoice['client_name'] ?? "",
+                      style: const TextStyle(color: Colors.white),
+                    )),
+                    DataCell(Text(
+                      _formatCurrency((invoice['amount'] as num).toDouble()),
+                      style: const TextStyle(
+                          color: Color(0xFF5B8CFF),
+                          fontWeight: FontWeight.bold),
+                    )),
+                    DataCell(Container(
+                      padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        invoice['status'],
+                        style: TextStyle(
+                            color: statusColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    )),
+                    DataCell(Text(
+                      DateFormat('dd MMM yyyy').format(issue),
+                      style: const TextStyle(color: Colors.white70),
+                    )),
+                    DataCell(Text(
+                      DateFormat('dd MMM yyyy').format(due),
+                      style: TextStyle(
+                          color: due.isBefore(DateTime.now()) &&
+                              status != "paid"
+                              ? const Color(0xFFEF4444)
+                              : Colors.white70),
+                    )),
+                    DataCell(Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.visibility,
+                              size: 18, color: Colors.white70),
+                          onPressed: () => _viewInvoiceDetails(invoice),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit,
+                              size: 18, color: Color(0xFF5B8CFF)),
+                          onPressed: () => _editInvoice(invoice),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete,
+                              size: 18, color: Color(0xFFEF4444)),
+                          onPressed: () =>
+                              _showDeleteDialog(invoice['id'], invoice['id']),
+                        ),
+                        // if (status != "paid")
+                        //   IconButton(
+                        //     icon: const Icon(Icons.check_circle,
+                        //         size: 18, color: Color(0xFF22C55E)),
+                        //     onPressed: () => _markAsPaid(invoice['id']),
+                        //   ),
+                      ],
+                    )),
+                  ],
+                );
+              }).toList(),
             ),
           ),
         ),
@@ -1444,24 +1435,23 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
 
   Future<void> _markAsPaid(String id) async {
     try {
-
       await _supabase.updateInvoiceStatus(id, "PAID");
-
       await _loadData();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Invoice marked as Paid"),
-          backgroundColor: Color(0xFF22C55E),
-        ),
-      );
-
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Invoice marked as Paid"),
+            backgroundColor: Color(0xFF22C55E),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
       _showErrorSnackBar("Error updating invoice");
     }
   }
 
-  static Widget _liquidBlob({
+  Widget _liquidBlob({
     required double width,
     required double height,
     required Color color,
@@ -1480,88 +1470,120 @@ class _InvoiceDashboardScreenState extends State<InvoiceDashboardScreen> {
     );
   }
 
-  Future<void> exportExcel(List<Map<String,dynamic>> invoices) async {
-
-    await Permission.storage.request();
-    var excel = Excel.createExcel();
-    Sheet sheet = excel['Invoices'];
-
-    sheet.appendRow([
-      "Invoice ID",
-      "Client",
-      "Amount",
-      "Status",
-      "Issue Date",
-      "Due Date"
-    ]);
-
-    for (var inv in invoices) {
-      sheet.appendRow([
-        inv['id'],
-        inv['client_name'],
-        inv['amount'],
-        inv['status'],
-        inv['date_issued'],
-        inv['due_date']
-      ]);
+  Future<void> exportExcel(List<Map<String, dynamic>> invoices) async {
+    var status = await Permission.storage.request();
+    if (!status.isGranted) {
+      _showErrorSnackBar("Storage permission required");
+      return;
     }
 
-    final downloads = Directory("/storage/emulated/0/Download");
+    try {
+      var excel = Excel.createExcel();
+      Sheet sheet = excel['Invoices'];
 
-    final file = File("${downloads.path}/Invoices.xlsx");
+      sheet.appendRow([
+        "Invoice ID",
+        "Client",
+        "Amount",
+        "Status",
+        "Issue Date",
+        "Due Date"
+      ]);
 
-    file.writeAsBytesSync(excel.encode()!);
+      for (var inv in invoices) {
+        sheet.appendRow([
+          inv['id'],
+          inv['client_name'],
+          inv['amount'],
+          inv['status'],
+          inv['date_issued'],
+          inv['due_date']
+        ]);
+      }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Excel saved to Downloads"),
-        backgroundColor: Color(0xFF22C55E),
-      ),
-    );
+      final downloads = Directory("/storage/emulated/0/Download");
+      if (!await downloads.exists()) {
+        _showErrorSnackBar("Downloads folder not found");
+        return;
+      }
+
+      final file = File("${downloads.path}/Invoices_${DateTime.now().millisecondsSinceEpoch}.xlsx");
+      await file.writeAsBytes(excel.encode()!);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Excel saved to ${file.path}"),
+            backgroundColor: const Color(0xFF22C55E),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      _showErrorSnackBar("Error saving Excel: $e");
+    }
   }
 
-  Future<void> exportPDF(List<Map<String,dynamic>> invoices) async {
+  Future<void> exportPDF(List<Map<String, dynamic>> invoices) async {
+    var status = await Permission.storage.request();
+    if (!status.isGranted) {
+      _showErrorSnackBar("Storage permission required");
+      return;
+    }
 
-    await Permission.storage.request();
+    try {
+      final pdf = pw.Document();
+      pdf.addPage(
+        pw.Page(
+          build: (pw.Context context) {
+            return pw.Column(
+              children: [
+                pw.Text(
+                  "Invoices Report",
+                  style: pw.TextStyle(
+                    fontSize: 24,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+                pw.Table.fromTextArray(
+                  headers: ["Invoice", "Client", "Amount", "Status", "Issue Date"],
+                  data: invoices.map((inv) {
+                    return [
+                      inv['id'],
+                      inv['client_name'],
+                      "₹${inv['amount']}",
+                      inv['status'],
+                      inv['date_issued']
+                    ];
+                  }).toList(),
+                ),
+              ],
+            );
+          },
+        ),
+      );
 
-    final pdf = pw.Document();
+      final downloads = Directory("/storage/emulated/0/Download");
+      if (!await downloads.exists()) {
+        _showErrorSnackBar("Downloads folder not found");
+        return;
+      }
 
-    pdf.addPage(
-      pw.Page(
-        build: (pw.Context context) {
-          return pw.Table.fromTextArray(
-            headers: [
-              "Invoice",
-              "Client",
-              "Amount",
-              "Status",
-              "Issue Date"
-            ],
-            data: invoices.map((inv) {
-              return [
-                inv['id'],
-                inv['client_name'],
-                inv['amount'].toString(),
-                inv['status'],
-                inv['date_issued']
-              ];
-            }).toList(),
-          );
-        },
-      ),
-    );
+      final file = File("${downloads.path}/Invoices_${DateTime.now().millisecondsSinceEpoch}.pdf");
+      await file.writeAsBytes(await pdf.save());
 
-    final downloads = Directory("/storage/emulated/0/Download");
-
-    final file = File("${downloads.path}/Invoices.pdf");
-
-    await file.writeAsBytes(await pdf.save());
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Excel saved to Downloads"),
-        backgroundColor: Color(0xFF22C55E),
-      ),
-    );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("PDF saved to ${file.path}"),
+            backgroundColor: const Color(0xFF22C55E),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      _showErrorSnackBar("Error saving PDF: $e");
+    }
   }
 }

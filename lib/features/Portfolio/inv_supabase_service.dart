@@ -84,7 +84,7 @@ class SupabaseService {
     final response = await _client
         .from('investment_redemptions')
         .select()
-        .eq('investment_id', investmentId);
+        .eq('investment_id', int.parse(investmentId));
 
     return (response as List).map((json) => Redemption.fromJson(json)).toList();
   }
@@ -125,18 +125,24 @@ class SupabaseService {
 
 
   Future<void> addRedemption(
-    String investmentId,
-    double amount,
-    String notes,
-  ) async {
-    await _client.from('investment_redemptions').insert({
+      String investmentId,
+      double amount,
+      String notes,
+      ) async {
+
+    final response = await _client
+        .from('investment_redemptions')
+        .insert({
       'user_id': userId,
-      'investment_id': investmentId,
+      'investment_id': investmentId.toString(),
       'amount': amount,
       'redemption_date': DateTime.now().toIso8601String().split('T')[0],
       'redemption_type': 'partial',
       'notes': notes,
-    });
+    })
+        .select()
+        .single();
+
   }
 
   // Financial Goals

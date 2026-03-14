@@ -15,59 +15,56 @@ class GlassTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.only(
-        bottomLeft: Radius.circular(32),
-        bottomRight: Radius.circular(32),
-      ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
-        child: Container(
-          height: 84,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.10),
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(32),
-              bottomRight: Radius.circular(32),
-            ),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.22),
-              width: 0.6,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.45),
-                blurRadius: 34,
-                offset: const Offset(0, 22),
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0), // same spacing feel as bottom nav
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+            child: Container(
+              height: 60,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.white.withOpacity(0.20),
+                    Colors.white.withOpacity(0.10),
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.25),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.35),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  )
+                ],
               ),
-            ],
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                SizedBox(
-                  width: 48,
-                  child: leading,
-                ),
-                Expanded(
-                  child: Center(
-                    child: title ??
-                        const SizedBox(
-                          height: 24,
-                        ),
+              child: Row(
+                children: [
+                  if (leading != null) leading!,
+
+                  const SizedBox(width: 12),
+
+                  Expanded(
+                    child: title ?? const SizedBox(),
                   ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: actions ??
-                      const [
-                        SizedBox(width: 48),
-                      ],
-                ),
-              ],
+
+                  if (actions != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: actions!,
+                    ),
+                ],
+              ),
             ),
           ),
         ),

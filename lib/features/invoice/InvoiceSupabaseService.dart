@@ -1,7 +1,49 @@
+// lib/features/invoice/InvoiceSupabaseService.dart
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseService {
   final SupabaseClient _client = Supabase.instance.client;
+
+  // ========== SETTINGS OPERATIONS ==========
+
+  Future<Map<String, dynamic>?> getSettings(String userId) async {
+    try {
+      final response = await _client
+          .from('settings')
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle();
+
+      return response;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<void> updateSettings(String userId, Map<String, dynamic> settingsData) async {
+    try {
+      final existing = await getSettings(userId);
+
+      if (existing == null) {
+        await _client.from('settings').insert({
+          'user_id': userId,
+          ...settingsData,
+          'created_at': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
+        });
+      } else {
+        await _client
+            .from('settings')
+            .update({
+          ...settingsData,
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+            .eq('user_id', userId);
+      }
+    } catch (e) {
+      throw Exception('Failed to update settings: $e');
+    }
+  }
 
   // ========== INVOICE OPERATIONS ==========
 
@@ -51,7 +93,6 @@ class SupabaseService {
   }
 
   Map<String, dynamic> _processInvoice(Map<String, dynamic> invoice) {
-    // Convert all numeric values to double consistently
     final processed = Map<String, dynamic>.from(invoice);
 
     if (processed['amount'] != null) {
@@ -63,8 +104,13 @@ class SupabaseService {
     if (processed['tax'] != null) {
       processed['tax'] = _toDouble(processed['tax']);
     }
+    if (processed['discount'] != null) {
+      processed['discount'] = _toDouble(processed['discount']);
+    }
+    if (processed['tax_rate'] != null) {
+      processed['tax_rate'] = _toDouble(processed['tax_rate']);
+    }
 
-    // Process items if they exist
     if (processed['items'] != null && processed['items'] is List) {
       processed['items'] = (processed['items'] as List).map((item) {
         final processedItem = Map<String, dynamic>.from(item as Map);
@@ -106,6 +152,8 @@ class SupabaseService {
         'amount': invoiceData['amount'],
         'subtotal': invoiceData['subtotal'],
         'tax': invoiceData['tax'],
+        'discount': invoiceData['discount'] ?? 0,
+        'tax_rate': invoiceData['tax_rate'] ?? 18,
         'date_issued': invoiceData['date_issued'],
         'due_date': invoiceData['due_date'],
         'status': invoiceData['status'] ?? 'DRAFT',
@@ -133,6 +181,8 @@ class SupabaseService {
         'amount': invoiceData['amount'],
         'subtotal': invoiceData['subtotal'],
         'tax': invoiceData['tax'],
+        'discount': invoiceData['discount'] ?? 0,
+        'tax_rate': invoiceData['tax_rate'] ?? 18,
         'date_issued': invoiceData['date_issued'],
         'due_date': invoiceData['due_date'],
         'status': invoiceData['status'] ?? 'DRAFT',
@@ -166,7 +216,6 @@ class SupabaseService {
 
   Future<void> deleteInvoice(String id) async {
     try {
-      // First get the invoice to get client_id
       final invoice = await getInvoiceById(id);
 
       await _client.from('invoices').delete().eq('id', id);
@@ -338,47 +387,6 @@ class SupabaseService {
       };
     } catch (e) {
       throw Exception('Failed to get dashboard stats: $e');
-    }
-  }
-
-  // ========== SETTINGS OPERATIONS ==========
-
-  Future<Map<String, dynamic>?> getSettings(String userId) async {
-    try {
-      final response = await _client
-          .from('settings')
-          .select('*')
-          .eq('user_id', userId)
-          .maybeSingle();
-
-      return response;
-    } catch (e) {
-      throw Exception('Failed to fetch settings: $e');
-    }
-  }
-
-  Future<void> updateSettings(String userId, Map<String, dynamic> settingsData) async {
-    try {
-      final existing = await getSettings(userId);
-
-      if (existing == null) {
-        await _client.from('settings').insert({
-          'user_id': userId,
-          ...settingsData,
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
-        });
-      } else {
-        await _client
-            .from('settings')
-            .update({
-          ...settingsData,
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-            .eq('user_id', userId);
-      }
-    } catch (e) {
-      throw Exception('Failed to update settings: $e');
     }
   }
 }

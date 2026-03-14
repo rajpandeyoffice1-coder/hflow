@@ -17,7 +17,7 @@ class _CreateInvoiceScreenState extends State<CreateInvoiceScreen> {
   String invoiceNumber = '';
   late DateTime issueDate;
   late DateTime dueDate;
-  String invoiceStatus = 'DRAFT';
+  String invoiceStatus = 'PENDING';
 
   String selectedClientId = '';
   String selectedClientName = '';

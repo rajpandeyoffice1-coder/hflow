@@ -1,7 +1,10 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:provider/provider.dart';
 
 // ============================================================================
 // THEME PROVIDER - Manages app theme state
@@ -81,14 +84,12 @@ class ThemeProvider extends ChangeNotifier {
 
   ThemeData get currentTheme => _isDarkMode ? darkTheme : lightTheme;
 
-  // Toggle theme
   Future<void> toggleTheme() async {
     _isDarkMode = !_isDarkMode;
     await _saveThemePreference();
     notifyListeners();
   }
 
-  // Set theme
   Future<void> setTheme(bool isDark) async {
     if (_isDarkMode != isDark) {
       _isDarkMode = isDark;
@@ -97,7 +98,6 @@ class ThemeProvider extends ChangeNotifier {
     }
   }
 
-  // Load saved theme preference
   Future<void> loadThemePreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -108,7 +108,6 @@ class ThemeProvider extends ChangeNotifier {
     }
   }
 
-  // Save theme preference
   Future<void> _saveThemePreference() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -120,62 +119,266 @@ class ThemeProvider extends ChangeNotifier {
 }
 
 // ============================================================================
-// LANGUAGE PROVIDER - Manages app language
+// BIOMETRIC AUTH SERVICE
 // ============================================================================
 
-class LanguageProvider extends ChangeNotifier {
-  static final LanguageProvider _instance = LanguageProvider._internal();
-  factory LanguageProvider() => _instance;
-  LanguageProvider._internal();
+class BiometricAuthService {
+  static final LocalAuthentication _auth = LocalAuthentication();
 
-  String _currentLanguage = 'English';
-  String get currentLanguage => _currentLanguage;
-
-  final Map<String, Locale> supportedLanguages = {
-    'English': const Locale('en', 'US'),
-    'Hindi': const Locale('hi', 'IN'),
-    'Tamil': const Locale('ta', 'IN'),
-    'Telugu': const Locale('te', 'IN'),
-    'Kannada': const Locale('kn', 'IN'),
-    'Malayalam': const Locale('ml', 'IN'),
-  };
-
-  Future<void> setLanguage(String language) async {
-    if (supportedLanguages.containsKey(language)) {
-      _currentLanguage = language;
-      await _saveLanguagePreference();
-      notifyListeners();
+  static Future<bool> checkBiometricAvailability() async {
+    try {
+      final isAvailable = await _auth.canCheckBiometrics;
+      final isDeviceSupported = await _auth.isDeviceSupported();
+      return isAvailable && isDeviceSupported;
+    } catch (e) {
+      debugPrint('Error checking biometric availability: $e');
+      return false;
     }
   }
 
-  Future<void> loadLanguagePreference() async {
+  static Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _currentLanguage = prefs.getString('language') ?? 'English';
-      notifyListeners();
+      return await _auth.getAvailableBiometrics();
     } catch (e) {
-      debugPrint('Error loading language preference: $e');
+      debugPrint('Error getting biometrics: $e');
+      return [];
     }
   }
 
-  Future<void> _saveLanguagePreference() async {
+  static Future<bool> authenticateWithBiometrics() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('language', _currentLanguage);
+      final isAvailable = await checkBiometricAvailability();
+      if (!isAvailable) return false;
+
+      final authenticated = await _auth.authenticate(
+        localizedReason: 'Please authenticate to access your account',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+        ),
+      );
+      return authenticated;
     } catch (e) {
-      debugPrint('Error saving language preference: $e');
+      debugPrint('Error during biometric authentication: $e');
+      return false;
     }
   }
 }
 
 // ============================================================================
-// SETTINGS SERVICE - Manages all settings in SharedPreferences (no DB dependency)
+// DATABASE CONNECTION SERVICE
+// ============================================================================
+
+class DatabaseConnectionService {
+  static const String _supabaseUrlKey = 'supabase_url';
+  static const String _supabaseAnonKey = 'supabase_anon_key';
+
+  static Future<bool> testConnection(String url, String anonKey) async {
+    try {
+      final client = SupabaseClient(url, anonKey);
+      await client.from('settings').select('count').limit(1);
+      return true;
+    } catch (e) {
+      debugPrint('Connection test failed: $e');
+      return false;
+    }
+  }
+
+  static Future<void> saveConnectionDetails(String url, String anonKey) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_supabaseUrlKey, url);
+    await prefs.setString(_supabaseAnonKey, anonKey);
+  }
+
+  static Future<Map<String, String?>> loadConnectionDetails() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'url': prefs.getString(_supabaseUrlKey),
+      'anonKey': prefs.getString(_supabaseAnonKey),
+    };
+  }
+
+  static Future<void> reinitializeSupabase(String url, String anonKey) async {
+    await Supabase.initialize(
+      url: url,
+      anonKey: anonKey,
+    );
+  }
+}
+
+// ============================================================================
+// SETTINGS SERVICE - Manages settings in both SharedPreferences and Supabase
 // ============================================================================
 
 class SettingsService {
   static final SettingsService _instance = SettingsService._internal();
   factory SettingsService() => _instance;
   SettingsService._internal();
+
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  // Initialize settings table if it doesn't exist
+  Future<void> initializeSettingsTable() async {
+    try {
+      // Check if settings table exists by trying to select from it
+      await _supabase.from('settings').select('count').limit(1);
+    } catch (e) {
+      debugPrint('Settings table might not exist. Please create it manually: $e');
+      // Note: Table creation should be done in Supabase dashboard or migrations
+      // We'll handle this gracefully by returning default values
+    }
+  }
+
+  // Load all settings from Supabase
+  Future<Map<String, dynamic>> loadSettingsFromDB() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return {};
+
+      final response = await _supabase
+          .from('settings')
+          .select()
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (response == null) {
+        // Create default settings if none exist
+        return await _createDefaultSettings(user.id);
+      }
+
+      return response;
+    } catch (e) {
+      debugPrint('Error loading settings from DB: $e');
+      return {};
+    }
+  }
+
+  // Create default settings
+  Future<Map<String, dynamic>> _createDefaultSettings(String userId) async {
+    final defaultSettings = {
+      'user_id': userId,
+      'currency': 'INR',
+      'tax_rate': 18,
+      'invoice_prefix': 'INV-',
+      'profile_name': '',
+      'profile_email': '',
+      'profile_phone': '',
+      'profile_address': '',
+      'gstin': '',
+      'profile_gstin': '',
+      'bank_name': '',
+      'bank_account': '',
+      'bank_account_name': '',
+      'bank_ifsc': '',
+      'bank_swift': '',
+      'bank_branch': 'Main Branch',
+      'account_type': 'Current Account',
+      'created_at': DateTime.now().toIso8601String(),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      await _supabase.from('settings').insert(defaultSettings);
+      return defaultSettings;
+    } catch (e) {
+      debugPrint('Error creating default settings: $e');
+      return defaultSettings;
+    }
+  }
+
+  // Save settings to Supabase
+  Future<void> saveSettingsToDB(Map<String, dynamic> settings) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      // Ensure we have all required fields
+      final settingsToSave = {
+        ...settings,
+        'user_id': user.id,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      await _supabase
+          .from('settings')
+          .upsert(settingsToSave);
+    } catch (e) {
+      debugPrint('Error saving settings to DB: $e');
+    }
+  }
+
+  // Load all settings (combines DB and local settings)
+  Future<Map<String, dynamic>> loadAllSettings() async {
+    final Map<String, dynamic> allSettings = {};
+
+    try {
+      // Load from database
+      final dbSettings = await loadSettingsFromDB();
+      allSettings.addAll(dbSettings);
+
+      // Load notification settings from SharedPreferences
+      final notificationSettings = await loadNotificationSettings();
+      allSettings['expenseAlerts'] = notificationSettings['expenseAlerts'];
+      allSettings['promotions'] = notificationSettings['promotions'];
+
+      // Load biometric setting
+      allSettings['biometric'] = await loadBiometricSetting();
+
+      // Load theme and language from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      allSettings['language'] = prefs.getString('language') ?? 'English';
+      allSettings['isDarkMode'] = prefs.getBool('isDarkMode') ?? true;
+
+      return allSettings;
+    } catch (e) {
+      debugPrint('Error loading all settings: $e');
+      return {};
+    }
+  }
+
+  // Save all settings
+  Future<void> saveAllSettings(Map<String, dynamic> settings) async {
+    try {
+      // Save to database (only the fields that belong in DB)
+      final dbSettings = Map<String, dynamic>.from(settings)
+        ..remove('expenseAlerts')
+        ..remove('promotions')
+        ..remove('biometric')
+        ..remove('language')
+        ..remove('isDarkMode');
+
+      if (dbSettings.isNotEmpty) {
+        await saveSettingsToDB(dbSettings);
+      }
+
+      // Save notification settings
+      if (settings.containsKey('expenseAlerts') || settings.containsKey('promotions')) {
+        await saveNotificationSettings(
+          expenseAlerts: settings['expenseAlerts'] ?? true,
+          promotions: settings['promotions'] ?? false,
+        );
+      }
+
+      // Save biometric setting
+      if (settings.containsKey('biometric')) {
+        await saveBiometricSetting(settings['biometric']);
+      }
+
+      // Save language
+      if (settings.containsKey('language')) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('language', settings['language']);
+      }
+
+      // Save theme
+      if (settings.containsKey('isDarkMode')) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('isDarkMode', settings['isDarkMode']);
+      }
+    } catch (e) {
+      debugPrint('Error saving all settings: $e');
+    }
+  }
 
   // Load notification settings from SharedPreferences
   Future<Map<String, bool>> loadNotificationSettings() async {
@@ -226,26 +429,77 @@ class SettingsService {
     }
   }
 
-  // Load all settings at once
-  Future<Map<String, dynamic>> loadAllSettings() async {
+  // Load currency from DB
+  Future<String> loadCurrency() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      return {
-        'expenseAlerts': prefs.getBool('expenseAlerts') ?? true,
-        'promotions': prefs.getBool('promotions') ?? false,
-        'biometric': prefs.getBool('biometric') ?? true,
-        'language': prefs.getString('language') ?? 'English',
-        'isDarkMode': prefs.getBool('isDarkMode') ?? true,
-      };
+      final user = _supabase.auth.currentUser;
+      if (user == null) return 'INR';
+
+      final response = await _supabase
+          .from('settings')
+          .select('currency')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      return response?['currency'] ?? 'INR';
     } catch (e) {
-      debugPrint('Error loading all settings: $e');
-      return {
-        'expenseAlerts': true,
-        'promotions': false,
-        'biometric': true,
-        'language': 'English',
-        'isDarkMode': true,
-      };
+      debugPrint('Error loading currency: $e');
+      return 'INR';
+    }
+  }
+
+  // Save currency to DB
+  Future<void> saveCurrency(String currency) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      await _supabase
+          .from('settings')
+          .upsert({
+        'user_id': user.id,
+        'currency': currency,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Error saving currency: $e');
+    }
+  }
+
+  // Load tax rate from DB
+  Future<double> loadTaxRate() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return 18.0;
+
+      final response = await _supabase
+          .from('settings')
+          .select('tax_rate')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      return (response?['tax_rate'] ?? 18).toDouble();
+    } catch (e) {
+      debugPrint('Error loading tax rate: $e');
+      return 18.0;
+    }
+  }
+
+  // Save tax rate to DB
+  Future<void> saveTaxRate(double taxRate) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      await _supabase
+          .from('settings')
+          .upsert({
+        'user_id': user.id,
+        'tax_rate': taxRate,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      debugPrint('Error saving tax rate: $e');
     }
   }
 }
@@ -287,7 +541,6 @@ class _LanguageSelectorDialogState extends State<LanguageSelectorDialog> {
 
   @override
   Widget build(BuildContext context) {
-    // Get theme from parent context instead of creating new instance
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return AlertDialog(
@@ -384,71 +637,67 @@ class _LanguageSelectorDialogState extends State<LanguageSelectorDialog> {
 }
 
 // ============================================================================
-// CHANGE PASSWORD DIALOG (Uses Supabase for actual password change)
+// BIOMETRIC SETUP DIALOG
 // ============================================================================
 
-class ChangePasswordDialog extends StatefulWidget {
-  const ChangePasswordDialog({super.key});
+class BiometricSetupDialog extends StatefulWidget {
+  final Function(bool) onComplete;
+
+  const BiometricSetupDialog({super.key, required this.onComplete});
 
   @override
-  State<ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+  State<BiometricSetupDialog> createState() => _BiometricSetupDialogState();
 }
 
-class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _currentPasswordController = TextEditingController();
-  final _newPasswordController = TextEditingController();
-  final _confirmPasswordController = TextEditingController();
-  bool _isLoading = false;
-  bool _obscureCurrent = true;
-  bool _obscureNew = true;
-  bool _obscureConfirm = true;
+class _BiometricSetupDialogState extends State<BiometricSetupDialog> {
+  bool _isChecking = true;
+  bool _isAvailable = false;
+  List<BiometricType> _availableBiometrics = [];
+  bool _isSettingUp = false;
 
   @override
-  void dispose() {
-    _currentPasswordController.dispose();
-    _newPasswordController.dispose();
-    _confirmPasswordController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _checkBiometrics();
   }
 
-  Future<void> _changePassword() async {
-    if (!_formKey.currentState!.validate()) return;
+  Future<void> _checkBiometrics() async {
+    setState(() => _isChecking = true);
 
-    setState(() => _isLoading = true);
+    _isAvailable = await BiometricAuthService.checkBiometricAvailability();
+    if (_isAvailable) {
+      _availableBiometrics = await BiometricAuthService.getAvailableBiometrics();
+    }
 
-    try {
-      // Get current user
-      final user = Supabase.instance.client.auth.currentUser;
-      if (user == null) {
-        throw Exception('No user logged in');
-      }
+    setState(() => _isChecking = false);
+  }
 
-      // Update password
-      await Supabase.instance.client.auth.updateUser(
-        UserAttributes(password: _newPasswordController.text),
-      );
+  Future<void> _setupBiometric() async {
+    setState(() => _isSettingUp = true);
 
+    final authenticated = await BiometricAuthService.authenticateWithBiometrics();
+
+    if (authenticated) {
       if (mounted) {
-        Navigator.pop(context, true);
+        widget.onComplete(true);
+        Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Password changed successfully!'),
+            content: Text('Biometric authentication enabled successfully'),
             backgroundColor: Colors.green,
           ),
         );
       }
-    } catch (e) {
+    } else {
+      setState(() => _isSettingUp = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
+          const SnackBar(
+            content: Text('Authentication failed. Please try again.'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -459,116 +708,52 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
     return AlertDialog(
       backgroundColor: isDark ? const Color(0xFF1A1F2E) : Colors.white,
       title: Text(
-        'Change Password',
+        'Biometric Authentication',
         style: TextStyle(
           color: isDark ? Colors.white : Colors.black,
           fontSize: 18,
           fontWeight: FontWeight.w600,
         ),
       ),
-      content: Form(
-        key: _formKey,
-        child: Column(
+      content: Container(
+        width: 300,
+        child: _isChecking
+            ? const Center(
+          child: Padding(
+            padding: EdgeInsets.all(20),
+            child: CircularProgressIndicator(),
+          ),
+        )
+            : Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextFormField(
-              controller: _currentPasswordController,
-              obscureText: _obscureCurrent,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
-                labelText: 'Current Password',
-                labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
-                filled: true,
-                fillColor: isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.1),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscureCurrent ? Icons.visibility_off : Icons.visibility,
-                    color: isDark ? Colors.white70 : Colors.black54,
-                  ),
-                  onPressed: () => setState(() => _obscureCurrent = !_obscureCurrent),
+            Icon(
+              _isAvailable ? Icons.fingerprint : Icons.error_outline,
+              size: 64,
+              color: _isAvailable
+                  ? const Color(0xFF5B8CFF)
+                  : Colors.red,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _isAvailable
+                  ? 'Your device supports biometric authentication'
+                  : 'Biometric authentication is not available on this device',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
+            ),
+            if (_isAvailable && _availableBiometrics.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text(
+                'Available: ${_availableBiometrics.map((b) => b.name).join(', ')}',
+                style: TextStyle(
+                  color: isDark ? Colors.white54 : Colors.black54,
+                  fontSize: 12,
                 ),
               ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please enter current password';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _newPasswordController,
-              obscureText: _obscureNew,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
-                labelText: 'New Password',
-                labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
-                filled: true,
-                fillColor: isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.1),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscureNew ? Icons.visibility_off : Icons.visibility,
-                    color: isDark ? Colors.white70 : Colors.black54,
-                  ),
-                  onPressed: () => setState(() => _obscureNew = !_obscureNew),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please enter new password';
-                }
-                if (value.length < 6) {
-                  return 'Password must be at least 6 characters';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _confirmPasswordController,
-              obscureText: _obscureConfirm,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
-                labelText: 'Confirm Password',
-                labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
-                filled: true,
-                fillColor: isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.grey.withOpacity(0.1),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
-                ),
-                suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscureConfirm ? Icons.visibility_off : Icons.visibility,
-                    color: isDark ? Colors.white70 : Colors.black54,
-                  ),
-                  onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm),
-                ),
-              ),
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Please confirm new password';
-                }
-                if (value != _newPasswordController.text) {
-                  return 'Passwords do not match';
-                }
-                return null;
-              },
-            ),
+            ],
           ],
         ),
       ),
@@ -580,8 +765,200 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
             style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
           ),
         ),
+        if (_isAvailable)
+          ElevatedButton(
+            onPressed: _isSettingUp ? null : _setupBiometric,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF5B8CFF),
+            ),
+            child: _isSettingUp
+                ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            )
+                : const Text('Enable'),
+          ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// DATABASE CONNECTION DIALOG
+// ============================================================================
+
+class DatabaseConnectionDialog extends StatefulWidget {
+  final Function() onConnected;
+
+  const DatabaseConnectionDialog({super.key, required this.onConnected});
+
+  @override
+  State<DatabaseConnectionDialog> createState() => _DatabaseConnectionDialogState();
+}
+
+class _DatabaseConnectionDialogState extends State<DatabaseConnectionDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _urlController = TextEditingController();
+  final _anonKeyController = TextEditingController();
+  bool _isLoading = false;
+  bool _obscureKey = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingConnection();
+  }
+
+  @override
+  void dispose() {
+    _urlController.dispose();
+    _anonKeyController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadExistingConnection() async {
+    final details = await DatabaseConnectionService.loadConnectionDetails();
+    setState(() {
+      _urlController.text = details['url'] ?? '';
+      _anonKeyController.text = details['anonKey'] ?? '';
+    });
+  }
+
+  Future<void> _testAndSaveConnection() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    final url = _urlController.text.trim();
+    final anonKey = _anonKeyController.text.trim();
+
+    final isConnected = await DatabaseConnectionService.testConnection(url, anonKey);
+
+    if (isConnected) {
+      await DatabaseConnectionService.saveConnectionDetails(url, anonKey);
+      await DatabaseConnectionService.reinitializeSupabase(url, anonKey);
+
+      if (mounted) {
+        widget.onConnected();
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Database connected successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } else {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to connect to database. Please check your credentials.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return AlertDialog(
+      backgroundColor: isDark ? const Color(0xFF1A1F2E) : Colors.white,
+      title: Text(
+        'Database Connection',
+        style: TextStyle(
+          color: isDark ? Colors.white : Colors.black,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      content: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _urlController,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                decoration: InputDecoration(
+                  labelText: 'Supabase URL',
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                  hintText: 'https://your-project.supabase.co',
+                  hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.grey.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter Supabase URL';
+                  }
+                  if (!value.startsWith('https://')) {
+                    return 'URL must start with https://';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _anonKeyController,
+                obscureText: _obscureKey,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                decoration: InputDecoration(
+                  labelText: 'Anon Key',
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+                  hintText: 'eyJhbGciOiJIUzI1NiIs...',
+                  hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black26),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withOpacity(0.05)
+                      : Colors.grey.withOpacity(0.1),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureKey ? Icons.visibility_off : Icons.visibility,
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                    onPressed: () => setState(() => _obscureKey = !_obscureKey),
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter Anon Key';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+          ),
+        ),
         ElevatedButton(
-          onPressed: _isLoading ? null : _changePassword,
+          onPressed: _isLoading ? null : _testAndSaveConnection,
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF5B8CFF),
           ),
@@ -594,9 +971,325 @@ class _ChangePasswordDialogState extends State<ChangePasswordDialog> {
               valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
             ),
           )
-              : const Text('Change Password'),
+              : const Text('Test & Connect'),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================================
+// INVOICE SETTINGS DIALOG
+// ============================================================================
+
+class InvoiceSettingsDialog extends StatefulWidget {
+  final Map<String, dynamic> currentSettings;
+  final Function(Map<String, dynamic>) onSave;
+
+  const InvoiceSettingsDialog({
+    super.key,
+    required this.currentSettings,
+    required this.onSave,
+  });
+
+  @override
+  State<InvoiceSettingsDialog> createState() => _InvoiceSettingsDialogState();
+}
+
+class _InvoiceSettingsDialogState extends State<InvoiceSettingsDialog> {
+  late TextEditingController _prefixController;
+  late TextEditingController _profileNameController;
+  late TextEditingController _profileEmailController;
+  late TextEditingController _profilePhoneController;
+  late TextEditingController _profileAddressController;
+  late TextEditingController _gstinController;
+  late TextEditingController _bankNameController;
+  late TextEditingController _bankAccountController;
+  late TextEditingController _bankAccountNameController;
+  late TextEditingController _bankIfscController;
+  late TextEditingController _bankSwiftController;
+  late TextEditingController _bankBranchController;
+  late TextEditingController _accountTypeController;
+  late TextEditingController _currencyController;
+  late TextEditingController _taxRateController;
+
+  @override
+  void initState() {
+    super.initState();
+    _prefixController = TextEditingController(text: widget.currentSettings['invoice_prefix'] ?? 'INV-');
+    _profileNameController = TextEditingController(text: widget.currentSettings['profile_name'] ?? '');
+    _profileEmailController = TextEditingController(text: widget.currentSettings['profile_email'] ?? '');
+    _profilePhoneController = TextEditingController(text: widget.currentSettings['profile_phone'] ?? '');
+    _profileAddressController = TextEditingController(text: widget.currentSettings['profile_address'] ?? '');
+    _gstinController = TextEditingController(text: widget.currentSettings['gstin'] ?? '');
+    _bankNameController = TextEditingController(text: widget.currentSettings['bank_name'] ?? '');
+    _bankAccountController = TextEditingController(text: widget.currentSettings['bank_account'] ?? '');
+    _bankAccountNameController = TextEditingController(text: widget.currentSettings['bank_account_name'] ?? '');
+    _bankIfscController = TextEditingController(text: widget.currentSettings['bank_ifsc'] ?? '');
+    _bankSwiftController = TextEditingController(text: widget.currentSettings['bank_swift'] ?? '');
+    _bankBranchController = TextEditingController(text: widget.currentSettings['bank_branch'] ?? 'Main Branch');
+    _accountTypeController = TextEditingController(text: widget.currentSettings['account_type'] ?? 'Current Account');
+    _currencyController = TextEditingController(text: widget.currentSettings['currency'] ?? 'INR');
+    _taxRateController = TextEditingController(text: widget.currentSettings['tax_rate']?.toString() ?? '18');
+  }
+
+  @override
+  void dispose() {
+    _prefixController.dispose();
+    _profileNameController.dispose();
+    _profileEmailController.dispose();
+    _profilePhoneController.dispose();
+    _profileAddressController.dispose();
+    _gstinController.dispose();
+    _bankNameController.dispose();
+    _bankAccountController.dispose();
+    _bankAccountNameController.dispose();
+    _bankIfscController.dispose();
+    _bankSwiftController.dispose();
+    _bankBranchController.dispose();
+    _accountTypeController.dispose();
+    _currencyController.dispose();
+    _taxRateController.dispose();
+    super.dispose();
+  }
+
+  void _saveSettings() {
+    final settings = {
+      'invoice_prefix': _prefixController.text.trim(),
+      'profile_name': _profileNameController.text.trim(),
+      'profile_email': _profileEmailController.text.trim(),
+      'profile_phone': _profilePhoneController.text.trim(),
+      'profile_address': _profileAddressController.text.trim(),
+      'gstin': _gstinController.text.trim(),
+      'profile_gstin': _gstinController.text.trim(), // Alias for backward compatibility
+      'bank_name': _bankNameController.text.trim(),
+      'bank_account': _bankAccountController.text.trim(),
+      'bank_account_name': _bankAccountNameController.text.trim(),
+      'bank_ifsc': _bankIfscController.text.trim(),
+      'bank_swift': _bankSwiftController.text.trim(),
+      'bank_branch': _bankBranchController.text.trim(),
+      'account_type': _accountTypeController.text.trim(),
+      'currency': _currencyController.text.trim().toUpperCase(),
+      'tax_rate': double.tryParse(_taxRateController.text.trim()) ?? 18.0,
+    };
+    widget.onSave(settings);
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            constraints: const BoxConstraints(maxWidth: 500, maxHeight: 600),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [
+                  Colors.white.withOpacity(0.15),
+                  Colors.white.withOpacity(0.05),
+                ]
+                    : [
+                  Colors.white,
+                  Colors.grey.shade50,
+                ],
+              ),
+              border: Border.all(
+                color: isDark
+                    ? Colors.white.withOpacity(0.10)
+                    : Colors.grey.withOpacity(0.2),
+              ),
+            ),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.10)
+                            : Colors.grey.withOpacity(0.2),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Invoice Settings',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: Icon(
+                          Icons.close,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Currency & Tax',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _buildTextField(isDark, 'Currency (e.g., INR, USD)', _currencyController),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _buildTextField(isDark, 'Tax Rate (%)', _taxRateController, keyboardType: TextInputType.number),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        Text(
+                          'Invoice Prefix',
+                          style: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.black54,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        _buildTextField(isDark, 'Prefix (e.g., INV-)', _prefixController),
+                        const SizedBox(height: 16),
+
+                        Text(
+                          'Company / Profile Information',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Profile Name', _profileNameController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Email', _profileEmailController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Phone', _profilePhoneController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Address', _profileAddressController, maxLines: 3),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'GSTIN', _gstinController),
+                        const SizedBox(height: 16),
+
+                        Text(
+                          'Bank Account Details',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Bank Name', _bankNameController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Account Name', _bankAccountNameController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Account Number', _bankAccountController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'IFSC Code', _bankIfscController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'SWIFT Code', _bankSwiftController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Branch', _bankBranchController),
+                        const SizedBox(height: 8),
+                        _buildTextField(isDark, 'Account Type', _accountTypeController),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(
+                        color: isDark
+                            ? Colors.white.withOpacity(0.10)
+                            : Colors.grey.withOpacity(0.2),
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(
+                          'Cancel',
+                          style: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _saveSettings,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF5B8CFF),
+                        ),
+                        child: const Text('Save Settings'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField(bool isDark, String label, TextEditingController controller, {int maxLines = 1, TextInputType? keyboardType}) {
+    return TextField(
+      controller: controller,
+      maxLines: maxLines,
+      keyboardType: keyboardType,
+      style: TextStyle(color: isDark ? Colors.white : Colors.black),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black54),
+        filled: true,
+        fillColor: isDark
+            ? Colors.white.withOpacity(0.05)
+            : Colors.grey.withOpacity(0.1),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: BorderSide.none,
+        ),
+      ),
     );
   }
 }
@@ -675,10 +1368,10 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   bool biometric = true;
   String currentLanguage = 'English';
   bool isDarkMode = true;
+  Map<String, dynamic> dbSettings = {};
 
   // Services
   final themeProvider = ThemeProvider();
-  final languageProvider = LanguageProvider();
   final settingsService = SettingsService();
 
   // Loading state
@@ -697,19 +1390,30 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     setState(() => _isLoading = true);
 
     try {
-      // Load all settings at once
-      final settings = await settingsService.loadAllSettings();
+      // Initialize settings table if needed
+      await settingsService.initializeSettingsTable();
+
+      // Load all settings
+      final allSettings = await settingsService.loadAllSettings();
 
       setState(() {
-        expenseAlerts = settings['expenseAlerts'] as bool;
-        promotions = settings['promotions'] as bool;
-        biometric = settings['biometric'] as bool;
-        currentLanguage = settings['language'] as String;
-        isDarkMode = settings['isDarkMode'] as bool;
+        // Database settings
+        dbSettings = Map.from(allSettings)
+          ..remove('expenseAlerts')
+          ..remove('promotions')
+          ..remove('biometric')
+          ..remove('language')
+          ..remove('isDarkMode');
 
-        // Update providers
+        // Local settings
+        expenseAlerts = allSettings['expenseAlerts'] ?? true;
+        promotions = allSettings['promotions'] ?? false;
+        biometric = allSettings['biometric'] ?? true;
+        currentLanguage = allSettings['language'] ?? 'English';
+        isDarkMode = allSettings['isDarkMode'] ?? true;
+
+        // Update theme provider
         themeProvider.setTheme(isDarkMode);
-        languageProvider.setLanguage(currentLanguage);
 
         _isLoading = false;
         _isInitialized = true;
@@ -722,6 +1426,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   Future<void> _toggleExpenseAlerts(bool value) async {
     setState(() => expenseAlerts = value);
+
+    // Save to SharedPreferences
     await settingsService.saveNotificationSettings(
       expenseAlerts: expenseAlerts,
       promotions: promotions,
@@ -730,6 +1436,8 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   Future<void> _togglePromotions(bool value) async {
     setState(() => promotions = value);
+
+    // Save to SharedPreferences
     await settingsService.saveNotificationSettings(
       expenseAlerts: expenseAlerts,
       promotions: promotions,
@@ -737,34 +1445,56 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
   }
 
   Future<void> _toggleBiometric(bool value) async {
-    setState(() => biometric = value);
-    await settingsService.saveBiometricSetting(value);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value ? 'Biometric authentication enabled' : 'Biometric authentication disabled',
-          ),
-          backgroundColor: value ? Colors.green : Colors.orange,
-          duration: const Duration(seconds: 2),
+    if (value) {
+      // Show biometric setup dialog
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => BiometricSetupDialog(
+          onComplete: (success) {
+            if (success) {
+              setState(() => biometric = true);
+              settingsService.saveBiometricSetting(true);
+            }
+          },
         ),
       );
+
+      if (result != true) {
+        setState(() => biometric = false);
+      }
+    } else {
+      setState(() => biometric = false);
+      await settingsService.saveBiometricSetting(false);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Biometric authentication disabled'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _toggleTheme(bool value) async {
-    await themeProvider.setTheme(value);
-    setState(() => isDarkMode = themeProvider.isDarkMode);
+    // Actually toggle the theme
+    setState(() {
+      isDarkMode = value;
+    });
 
+    await themeProvider.setTheme(value);
+
+    // Save to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isDarkMode', value);
+
+    // Show confirmation
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            value ? 'Dark mode enabled' : 'Light mode enabled',
-          ),
+          content: Text(value ? 'Dark mode enabled' : 'Light mode enabled'),
           backgroundColor: const Color(0xFF5B8CFF),
-          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -780,39 +1510,57 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
     );
 
     if (selected != null && selected != currentLanguage) {
-      await languageProvider.setLanguage(selected);
       setState(() => currentLanguage = selected);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('language', selected);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Language changed to $selected'),
             backgroundColor: const Color(0xFF5B8CFF),
-            duration: const Duration(seconds: 2),
           ),
         );
       }
     }
   }
 
-  Future<void> _showChangePasswordDialog() async {
-    // Check if user is logged in
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please login to change password'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    await showDialog<bool>(
+  Future<void> _showInvoiceSettings() async {
+    await showDialog(
       context: context,
-      builder: (context) => const ChangePasswordDialog(),
+      builder: (context) => InvoiceSettingsDialog(
+        currentSettings: dbSettings,
+        onSave: (updatedSettings) async {
+          setState(() {
+            dbSettings.addAll(updatedSettings);
+          });
+
+          // Save to database
+          await settingsService.saveSettingsToDB(updatedSettings);
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Invoice settings saved successfully'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _showDatabaseConnectionDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) => DatabaseConnectionDialog(
+        onConnected: () {
+          // Refresh settings after connection
+          _initializeSettings();
+        },
+      ),
     );
   }
 
@@ -834,7 +1582,6 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
       await Supabase.instance.client.auth.signOut();
 
       if (mounted) {
-        // Navigate to login screen
         Navigator.of(context).pushNamedAndRemoveUntil(
           '/login',
               (route) => false,
@@ -854,14 +1601,13 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
   @override
   Widget build(BuildContext context) {
-    // Use the current theme from provider
     final isDark = themeProvider.isDarkMode;
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF05060A) : const Color(0xFFF5F5F5),
       body: Stack(
         children: [
-          // Background blobs (only in dark mode)
+          // Background blobs
           if (isDark) ...[
             Positioned(
               top: -120,
@@ -890,7 +1636,9 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               children: [
                 _header(isDark),
                 Expanded(
-                  child: SingleChildScrollView(
+                  child: _isLoading
+                      ? _buildLoading(isDark)
+                      : SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
                     child: Column(
                       children: [
@@ -952,6 +1700,72 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
 
                         _section(
                           isDark: isDark,
+                          title: "Invoice Settings",
+                          children: [
+                            _row(
+                              isDark: isDark,
+                              icon: Icons.currency_rupee,
+                              title: "Currency",
+                              subtitle: dbSettings['currency'] ?? 'INR',
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Edit",
+                                onTap: _showInvoiceSettings,
+                              ),
+                            ),
+                            _divider(isDark),
+                            _row(
+                              isDark: isDark,
+                              icon: Icons.percent,
+                              title: "Tax Rate",
+                              subtitle: "${dbSettings['tax_rate'] ?? 18}%",
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Edit",
+                                onTap: _showInvoiceSettings,
+                              ),
+                            ),
+                            _divider(isDark),
+                            _row(
+                              isDark: isDark,
+                              icon: Icons.receipt_outlined,
+                              title: "Invoice Prefix",
+                              subtitle: dbSettings['invoice_prefix'] ?? 'INV-',
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Edit",
+                                onTap: _showInvoiceSettings,
+                              ),
+                            ),
+                            _divider(isDark),
+                            _row(
+                              isDark: isDark,
+                              icon: Icons.business,
+                              title: "Company Details",
+                              subtitle: dbSettings['profile_name'] ?? 'Not set',
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Edit",
+                                onTap: _showInvoiceSettings,
+                              ),
+                            ),
+                            _divider(isDark),
+                            _row(
+                              isDark: isDark,
+                              icon: Icons.account_balance,
+                              title: "Bank Details",
+                              subtitle: dbSettings['bank_name'] ?? 'Not set',
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Edit",
+                                onTap: _showInvoiceSettings,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        _section(
+                          isDark: isDark,
                           title: "Notifications",
                           children: [
                             _row(
@@ -998,32 +1812,22 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
                                 activeTrackColor: const Color(0xFF5B8CFF).withOpacity(0.3),
                               ),
                             ),
-                            _divider(isDark),
+                          ],
+                        ),
+
+                        _section(
+                          isDark: isDark,
+                          title: "Advanced",
+                          children: [
                             _row(
                               isDark: isDark,
-                              icon: Icons.lock_outline,
-                              title: "Change Password",
-                              subtitle: "Update your password",
-                              trailing: GestureDetector(
-                                onTap: _showChangePasswordDialog,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF5B8CFF).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(16),
-                                    border: Border.all(
-                                      color: const Color(0xFF5B8CFF).withOpacity(0.3),
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    "Update",
-                                    style: TextStyle(
-                                      color: Color(0xFF5B8CFF),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
+                              icon: Icons.storage,
+                              title: "Database Connection",
+                              subtitle: "Configure Supabase connection",
+                              trailing: _buildActionButton(
+                                isDark: isDark,
+                                label: "Configure",
+                                onTap: _showDatabaseConnectionDialog,
                               ),
                             ),
                           ],
@@ -1087,6 +1891,34 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required bool isDark,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF5B8CFF).withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFF5B8CFF).withOpacity(0.3),
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Color(0xFF5B8CFF),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
       ),
     );
   }

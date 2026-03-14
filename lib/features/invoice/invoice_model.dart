@@ -1,3 +1,6 @@
+// lib/features/invoice/models/invoice_model.dart
+import 'package:intl/intl.dart';
+
 class InvoiceModel {
   final String id;
   final String invoiceNumber;
@@ -36,18 +39,18 @@ class InvoiceModel {
     return {
       'id': id,
       'invoice_number': invoiceNumber,
-      'issue_date': issueDate.toIso8601String(),
-      'due_date': dueDate.toIso8601String(),
       'client_id': clientId,
       'client_name': clientName,
-      'status': status,
-      'tax_rate': taxRate,
-      'discount': discount,
-      'items': items.map((item) => item.toJson()).toList(),
-      'notes': notes,
+      'amount': total,
       'subtotal': subtotal,
       'tax': tax,
-      'total': total,
+      'discount': discount,
+      'tax_rate': taxRate,
+      'date_issued': DateFormat('yyyy-MM-dd').format(issueDate),
+      'due_date': DateFormat('yyyy-MM-dd').format(dueDate),
+      'status': status,
+      'items': items.map((item) => item.toJson()).toList(),
+      'notes': notes,
     };
   }
 

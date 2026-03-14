@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hflow/features/invoice/InvoiceSupabaseService.dart';
+import 'package:hflow/features/invoice/invoice_pdf_service.dart';
 
 class InvoiceDetailScreen extends StatefulWidget {
   final Map<String, dynamic> invoice;
@@ -156,6 +157,259 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     return '₹${amount.toStringAsFixed(2)}';
   }
 
+  Widget _buildInvoicePreview() {
+    final items = _invoice['items'] as List? ?? [];
+    final subtotal = (_invoice['subtotal'] as num?)?.toDouble() ?? 0;
+    final tax = (_invoice['tax'] as num?)?.toDouble() ?? 0;
+    final total = (_invoice['amount'] as num?)?.toDouble() ?? 0;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            gradient: LinearGradient(
+              colors: [
+                Colors.white.withOpacity(0.12),
+                Colors.white.withOpacity(0.05),
+              ],
+            ),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "INVOICE",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        "Invoice: ${_invoice['id']}",
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      Text(
+                        "Date: ${DateFormat('dd MMM yyyy').format(DateTime.parse(_invoice['date_issued']))}",
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      Text(
+                        "Due: ${DateFormat('dd MMM yyyy').format(DateTime.parse(_invoice['due_date']))}",
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text("FROM",
+                            style: TextStyle(
+                                color: Colors.white54,
+                                fontWeight: FontWeight.bold)),
+                        SizedBox(height: 6),
+                        Text("Your Company Name",
+                            style: TextStyle(color: Colors.white)),
+                        Text("Address Line",
+                            style: TextStyle(color: Colors.white70)),
+                        Text("Phone",
+                            style: TextStyle(color: Colors.white70)),
+                        Text("Email",
+                            style: TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("BILLED TO",
+                            style: TextStyle(
+                                color: Colors.white54,
+                                fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 6),
+                        Text(
+                          _invoice['client_name'] ?? '',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 28),
+
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border(
+                      bottom: BorderSide(color: Colors.white.withOpacity(0.15))),
+                ),
+                child: Row(
+                  children: const [
+                    Expanded(
+                        flex: 4,
+                        child: Text("Description",
+                            style:
+                            TextStyle(color: Colors.white54, fontSize: 12))),
+                    Expanded(
+                        flex: 1,
+                        child: Text("Qty",
+                            textAlign: TextAlign.right,
+                            style:
+                            TextStyle(color: Colors.white54, fontSize: 12))),
+                    Expanded(
+                        flex: 2,
+                        child: Text("Unit Cost",
+                            textAlign: TextAlign.right,
+                            style:
+                            TextStyle(color: Colors.white54, fontSize: 12))),
+                    Expanded(
+                        flex: 2,
+                        child: Text("Amount",
+                            textAlign: TextAlign.right,
+                            style:
+                            TextStyle(color: Colors.white54, fontSize: 12))),
+                  ],
+                ),
+              ),
+
+              ...items.map((item) {
+                final qty = (item['quantity'] as num?)?.toInt() ?? 1;
+                final rate = (item['rate'] as num?)?.toDouble() ?? 0;
+                final amount = qty * rate;
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom:
+                      BorderSide(color: Colors.white.withOpacity(0.05)),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                          flex: 4,
+                          child: Text(item['description'] ?? '',
+                              style:
+                              const TextStyle(color: Colors.white))),
+                      Expanded(
+                          flex: 1,
+                          child: Text(qty.toString(),
+                              textAlign: TextAlign.right,
+                              style:
+                              const TextStyle(color: Colors.white70))),
+                      Expanded(
+                          flex: 2,
+                          child: Text(_formatCurrency(rate),
+                              textAlign: TextAlign.right,
+                              style:
+                              const TextStyle(color: Colors.white70))),
+                      Expanded(
+                          flex: 2,
+                          child: Text(_formatCurrency(amount),
+                              textAlign: TextAlign.right,
+                              style: const TextStyle(
+                                  color: Color(0xFF5B8CFF),
+                                  fontWeight: FontWeight.w600))),
+                    ],
+                  ),
+                );
+              }),
+
+              const SizedBox(height: 20),
+
+              Align(
+                alignment: Alignment.centerRight,
+                child: SizedBox(
+                  width: 260,
+                  child: Column(
+                    children: [
+                      _buildSummaryRow("Subtotal", _formatCurrency(subtotal)),
+                      const SizedBox(height: 6),
+                      _buildSummaryRow("Tax", _formatCurrency(tax)),
+                      const Divider(color: Colors.white24),
+                      Row(
+                        children: [
+                          const Text("TOTAL",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          Text(
+                            _formatCurrency(total),
+                            style: const TextStyle(
+                                color: Color(0xFF5B8CFF),
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold),
+                          )
+                        ],
+                      )
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text("BANK ACCOUNT DETAILS",
+                      style: TextStyle(
+                          color: Colors.white54,
+                          fontWeight: FontWeight.bold)),
+                  SizedBox(height: 8),
+                  Text("Account Name",
+                      style: TextStyle(color: Colors.white70)),
+                  Text("Account Number",
+                      style: TextStyle(color: Colors.white70)),
+                  Text("Bank Name",
+                      style: TextStyle(color: Colors.white70)),
+                  Text("IFSC Code",
+                      style: TextStyle(color: Colors.white70)),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              const Center(
+                child: Text(
+                  "Thank you for your business!",
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -219,12 +473,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                           const SizedBox(height: 20),
                           _buildClientInfo(),
                           const SizedBox(height: 20),
-                          _buildItemsList(),
-                          const SizedBox(height: 20),
-                          _buildInvoiceSummary(),
-                          const SizedBox(height: 20),
-                          _buildNotes(),
-                          const SizedBox(height: 30),
+                          _buildInvoicePreview(),
                         ],
                       ),
                     ),
@@ -262,6 +511,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                 color: Colors.white,
               ),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.download_rounded, size: 20, color: Colors.white),
+            onPressed: () {
+              InvoicePdfService.viewInvoice(_invoice);
+            },
           ),
           IconButton(
             icon: const Icon(Icons.refresh, size: 18, color: Colors.white),

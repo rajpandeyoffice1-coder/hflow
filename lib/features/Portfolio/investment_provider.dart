@@ -26,23 +26,28 @@ class InvestmentProvider extends ChangeNotifier {
   String get errorMessage => _errorMessage;
 
   Future<void> loadInitialData() async {
+
     _isLoading = true;
     notifyListeners();
 
     try {
-      await Future.wait([
-        loadCategories(),
-        loadInvestments(),
-        loadFinancialGoals(),
-      ]);
+
+      await loadCategories();
+      await loadInvestments();
+      await loadFinancialGoals();
+
       _errorMessage = '';
+
     } catch (e) {
+
       _errorMessage = e.toString();
       debugPrint('Error loading initial data: $e');
-    } finally {
-      _isLoading = false;
-      notifyListeners();
+
     }
+
+    _isLoading = false;
+    notifyListeners();
+
   }
 
 
@@ -134,25 +139,55 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   Future<void> loadInvestments() async {
-    try {
-      final response = await _supabaseService.getInvestments();
-      _investments = response.map((json) => Investment.fromJson(json)).toList();
 
-      // Load redemptions for each investment
+    try {
+
+      final response = await _supabaseService.getInvestments();
+
+      _investments =
+          response.map((json) => Investment.fromJson(json)).toList();
+
       for (var investment in _investments) {
-        final redemptions = await _supabaseService.getRedemptions(
-          investment.id,
-        );
+
+        final redemptions =
+        await _supabaseService.getRedemptions(investment.id);
+
         investment.redemptions = redemptions;
-        investment.redeemedAmount = redemptions.fold(
-          0,
-          (sum, r) => sum + r.amount,
-        );
+
+        investment.redeemedAmount =
+            redemptions.fold(0, (sum, r) => sum + r.amount);
+
       }
+
+// 🔥 Remove fully redeemed investments
+      _investments = _investments
+          .where((inv) => inv.redeemedAmount < inv.amount)
+          .toList();
+
+      notifyListeners();
+
+      for (var investment in _investments) {
+
+        final redemptions =
+        await _supabaseService.getRedemptions(investment.id);
+
+        investment.redemptions = redemptions;
+
+        investment.redeemedAmount =
+            redemptions.fold(0, (sum, r) => sum + r.amount);
+
+      }
+
+      notifyListeners();   // 🔥 IMPORTANT
+
     } catch (e) {
+
       debugPrint('Error loading investments: $e');
+
       _initializeSampleData();
+
     }
+
   }
 
   void _initializeSampleData() {
@@ -243,17 +278,23 @@ class InvestmentProvider extends ChangeNotifier {
   }
 
   Future<void> redeemInvestment(
-    String investmentId,
-    double amount,
-    String notes,
-  ) async {
-    try {
-      await _supabaseService.addRedemption(investmentId, amount, notes);
-      await loadInvestments();
-    } catch (e) {
-      debugPrint('Error redeeming investment: $e');
-      rethrow;
-    }
+      String investmentId,
+      double amount,
+      String notes,
+      ) async {
+
+    await _supabaseService.addRedemption(
+      investmentId,
+      amount,
+      notes,
+    );
+
+    await refreshData();   // 🔥 THIS RELOADS EVERYTHING
+
+  }
+
+  Future<List<Redemption>> getRedemptions(String investmentId) async {
+    return await _supabaseService.getRedemptions(investmentId);
   }
 
   // Analytics Methods

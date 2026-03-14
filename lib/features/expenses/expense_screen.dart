@@ -35,6 +35,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
   List<Map<String, dynamic>> _allExpenses = [];
   List<Map<String, dynamic>> _expenseCategories = [];
+  List<Map<String, dynamic>> _allExpensesForStats = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -111,6 +112,26 @@ class _ExpenseScreenState extends State<ExpenseScreen>
     }
   }
 
+  Future<void> _refreshAllData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _loadExpenses();
+      await _loadMonthlyTrend();
+      _calculateStats();
+      _updateSearchSummary();
+      await _updateBalanceSummary();
+    } catch (e) {
+      print("Refresh error: $e");
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
   Future<String?> _createCategory(String name) async {
     try {
       final supabase = Supabase.instance.client;
@@ -140,35 +161,181 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   Future<String?> _showCreateCategoryDialog() async {
     final controller = TextEditingController();
 
-    return showDialog<String>(
+    return showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withOpacity(0.7),
       builder: (context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1A1F2E),
-          title: const Text(
-            "Create Category",
-            style: TextStyle(color: Colors.white),
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
-          content: TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
-              hintText: "Category name",
-              hintStyle: TextStyle(color: Colors.white54),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+              child: Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1F2E).withOpacity(0.95),
+                  borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(28)),
+                  border: Border.all(color: Colors.white.withOpacity(0.08)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+
+                    /// HEADER
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF5B8CFF).withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(
+                            Icons.category,
+                            color: Color(0xFF5B8CFF),
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            "Create New Category",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close,
+                              color: Colors.white.withOpacity(0.7)),
+                          onPressed: () => Navigator.pop(context),
+                        )
+                      ],
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    Text(
+                      "Add a new category to organize your expenses.",
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.white.withOpacity(0.6),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    /// INPUT
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border:
+                        Border.all(color: Colors.white.withOpacity(0.15)),
+                      ),
+                      child: TextField(
+                        controller: controller,
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: "Category name",
+                          hintStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.5),
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.label_outline,
+                            color: Colors.white70,
+                          ),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    /// BUTTONS
+                    Row(
+                      children: [
+
+                        /// CANCEL
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () => Navigator.pop(context),
+                            child: Container(
+                              height: 46,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.2)),
+                              ),
+                              child: const Text(
+                                "Cancel",
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(width: 12),
+
+                        /// CREATE
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.pop(
+                                  context, controller.text.trim());
+                            },
+                            child: Container(
+                              height: 46,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF5B8CFF),
+                                    Color(0xFF7C9CFF),
+                                  ],
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.add, color: Colors.white, size: 18),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    "Create Category",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel"),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context, controller.text.trim());
-              },
-              child: const Text("Create"),
-            ),
-          ],
         );
       },
     );
@@ -259,13 +426,13 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       var query = supabase
           .from('expenses')
           .select('''
-            *,
-            expense_categories!left(
-              name,
-              color,
-              icon
-            )
-          ''');
+        *,
+        expense_categories!left(
+          name,
+          color,
+          icon
+        )
+      ''');
 
       if (_selectedDateRange != null) {
         query = query
@@ -295,9 +462,57 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       final response = await query.order('date_incurred', ascending: false);
 
+      final mappedExpenses = response.map<Map<String, dynamic>>((expense) {
+        final category = expense['expense_categories'] as Map<String, dynamic>?;
+
+        String categoryName = 'Uncategorized';
+        if (category != null && category['name'] != null) {
+          categoryName = category['name'];
+        } else if (expense['category_name'] != null) {
+          categoryName = expense['category_name'];
+        }
+
+        return {
+          'id': expense['id'].toString(),
+          'date': DateTime.parse(expense['date_incurred']),
+          'formattedDate': DateFormat('dd MMM yyyy')
+              .format(DateTime.parse(expense['date_incurred'])),
+          'description': expense['description'] ?? '',
+          'notes': expense['notes'] ?? '',
+          'amount': (expense['amount'] as num?)?.toDouble() ?? 0.0,
+          'category': categoryName,
+          'category_id': expense['category_id']?.toString(),
+          'paymentMethod':
+          expense['payment_method']?.toString().toUpperCase() ?? 'CASH',
+          'vendor': expense['vendor_name'] ?? '-',
+          'business': expense['is_business_expense'] ?? true,
+          'taxDeductible': expense['tax_deductible'] ?? false,
+          'receiptNumber': expense['receipt_number'],
+          'tags': expense['tags'] ?? [],
+        };
+      }).toList();
+
       setState(() {
-        _allExpenses = response.map<Map<String, dynamic>>((expense) {
-          final category = expense['expense_categories'] as Map<String, dynamic>?;
+        _allExpenses = mappedExpenses;
+      });
+
+      // Load full data for category breakdown (no filters)
+      if (_allExpensesForStats.isEmpty) {
+        final allResponse = await supabase
+            .from('expenses')
+            .select('''
+          *,
+          expense_categories!left(
+            name,
+            color,
+            icon
+          )
+        ''')
+            .order('date_incurred', ascending: false);
+
+        final allMapped = allResponse.map<Map<String, dynamic>>((expense) {
+          final category =
+          expense['expense_categories'] as Map<String, dynamic>?;
 
           String categoryName = 'Uncategorized';
           if (category != null && category['name'] != null) {
@@ -307,26 +522,15 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           }
 
           return {
-            'id': expense['id'].toString(),
-            'date': DateTime.parse(expense['date_incurred']),
-            'formattedDate': DateFormat(
-              'dd MMM yyyy',
-            ).format(DateTime.parse(expense['date_incurred'])),
-            'description': expense['description'] ?? '',
-            'notes': expense['notes'] ?? '',
-            'amount': (expense['amount'] as num?)?.toDouble() ?? 0.0,
             'category': categoryName,
-            'category_id': expense['category_id']?.toString(),
-            'paymentMethod':
-            expense['payment_method']?.toString().toUpperCase() ?? 'CASH',
-            'vendor': expense['vendor_name'] ?? '-',
-            'business': expense['is_business_expense'] ?? true,
-            'taxDeductible': expense['tax_deductible'] ?? false,
-            'receiptNumber': expense['receipt_number'],
-            'tags': expense['tags'] ?? [],
+            'amount': (expense['amount'] as num?)?.toDouble() ?? 0.0,
           };
         }).toList();
-      });
+
+        setState(() {
+          _allExpensesForStats = allMapped;
+        });
+      }
     } catch (e) {
       print('Error loading expenses: $e');
       rethrow;
@@ -507,7 +711,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
   Map<String, double> get categoryTotals {
     final totals = <String, double>{};
-    for (var exp in _allExpenses) {
+    for (var exp in _allExpensesForStats) {
       final category = exp['category'] as String;
       totals[category] = (totals[category] ?? 0) + (exp['amount'] as double);
     }
@@ -573,11 +777,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       await supabase.from('expenses').insert(expense);
 
-      await _loadExpenses();
-      await _loadMonthlyTrend();
-      _calculateStats();
-      _updateSearchSummary();
-      _updateBalanceSummary();
+      await _refreshAllData();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -631,11 +831,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
 
       await supabase.from('expenses').update(updates).eq('id', id);
 
-      await _loadExpenses();
-      await _loadMonthlyTrend();
-      _calculateStats();
-      _updateSearchSummary();
-      _updateBalanceSummary();
+      await _refreshAllData();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -700,11 +896,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       final supabase = Supabase.instance.client;
       await supabase.from('expenses').delete().eq('id', expense['id']);
 
-      await _loadExpenses();
-      await _loadMonthlyTrend();
-      _calculateStats();
-      _updateSearchSummary();
-      _updateBalanceSummary();
+      await _refreshAllData();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1304,11 +1496,10 @@ class _ExpenseScreenState extends State<ExpenseScreen>
           ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadData,
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
-            onPressed: () {},
+            onPressed: () {
+              _clearAllFilters();
+              _loadData();
+            },
           ),
         ],
       ),
@@ -1606,7 +1797,12 @@ class _ExpenseScreenState extends State<ExpenseScreen>
   }
 
   Widget _buildCategoryBreakdown() {
-    final totals = categoryTotals;
+    final totals = Map.fromEntries(
+      categoryTotals.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value)),
+    );
+
+    final totalAmount = totals.values.fold(0.0, (a, b) => a + b);
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -1642,7 +1838,9 @@ class _ExpenseScreenState extends State<ExpenseScreen>
               ),
               const SizedBox(height: 16),
               ...totals.entries.map((entry) {
-                final percentage = (entry.value / _totalExpenses * 100);
+                final percentage =
+                totalAmount == 0 ? 0.0 : entry.value / totalAmount;
+
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
@@ -1678,7 +1876,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
                               ),
                             ),
                             FractionallySizedBox(
-                              widthFactor: percentage / 100,
+                              widthFactor: percentage,
                               child: Container(
                                 height: 6,
                                 decoration: BoxDecoration(
@@ -1710,6 +1908,7 @@ class _ExpenseScreenState extends State<ExpenseScreen>
       ),
     );
   }
+
 
   Widget _buildIncomeVsExpenses() {
     final netProfit = (_totalExpenses * 1.3) - _totalExpenses;
@@ -2966,6 +3165,26 @@ class _ExpenseScreenState extends State<ExpenseScreen>
             size: 24,
           ),
           items: uniqueItems.map((e) {
+            if (e == "+ Create Category") {
+              return DropdownMenuItem<String>(
+                value: e,
+                child: Row(
+                  children: const [
+                    Icon(Icons.add_circle_outline,
+                        color: Color(0xFF5B8CFF), size: 18),
+                    SizedBox(width: 6),
+                    Text(
+                      "Create Category",
+                      style: TextStyle(
+                        color: Color(0xFF5B8CFF),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             return DropdownMenuItem<String>(
               value: e,
               child: Text(e),

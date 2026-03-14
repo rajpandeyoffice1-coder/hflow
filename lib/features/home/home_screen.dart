@@ -31,7 +31,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   int _currentIndex = 0;
-  static const double _topBarHeight = 84;
+  static const double _topBarHeight = 120;
 
   final supabase = Supabase.instance.client;
 
@@ -562,7 +562,7 @@ class _HomeScreenState extends State<HomeScreen>
                             radius: 18,
                             backgroundColor: const Color(0xFF5B8CFF),
                             child: Text(
-                              userName.isNotEmpty ? userName[0].toUpperCase() : 'R',
+                              userName.isNotEmpty ? userName[0].toUpperCase() : 'H',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -576,7 +576,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               Padding(
                 padding: EdgeInsets.only(
-                  top: _currentIndex == 0 ? _topBarHeight - 10 : 0,
+                  top: _currentIndex == 0 ? _topBarHeight - 40 : 0,
                 ),
                 child: SafeArea(
                   child: IndexedStack(
@@ -1834,8 +1834,8 @@ class _HomeScreenState extends State<HomeScreen>
               const Text(
                 "Overview",
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
                   color: Colors.white,
                 ),
               ),
@@ -1867,7 +1867,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 22),
           Row(
             children: [
               Expanded(
@@ -1875,6 +1875,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: "₹${NumberFormat('#,##0').format(income)}",
                   label: "Income",
                   color: Colors.greenAccent,
+                  icon: Icons.trending_up,
                 ),
               ),
               const SizedBox(width: 16),
@@ -1883,6 +1884,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: "₹${NumberFormat('#,##0').format(expenses)}",
                   label: "Expenses",
                   color: Colors.redAccent,
+                  icon: Icons.trending_down,
                 ),
               ),
             ],
@@ -1895,6 +1897,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: "₹${NumberFormat('#,##0').format(profit)}",
                   label: "Profit",
                   color: Colors.blueAccent,
+                  icon: Icons.account_balance_wallet,
                 ),
               ),
               const SizedBox(width: 16),
@@ -1903,6 +1906,7 @@ class _HomeScreenState extends State<HomeScreen>
                   value: "${margin.toStringAsFixed(1)}%",
                   label: "Margin",
                   color: Colors.purpleAccent,
+                  icon: Icons.percent,
                 ),
               ),
             ],
@@ -1916,41 +1920,86 @@ class _HomeScreenState extends State<HomeScreen>
     required String value,
     required String label,
     required Color color,
+    required IconData icon,
   }) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          gradient: LinearGradient(
-            colors: [
-              Colors.white.withOpacity(0.08),
-              Colors.white.withOpacity(0.04),
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          border: Border.all(color: Colors.white.withOpacity(0.15)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color,
+    return SizedBox(
+      height: 140, // FIXED HEIGHT
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              gradient: LinearGradient(
+                colors: [
+                  Colors.white.withOpacity(0.14),
+                  Colors.white.withOpacity(0.05),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.25),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.35),
+                  blurRadius: 25,
+                  spreadRadius: 1,
+                  offset: const Offset(0, 12),
+                )
+              ],
             ),
-            const SizedBox(height: 10),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, color: Colors.white54),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        color.withOpacity(0.9),
+                        color.withOpacity(0.5),
+                      ],
+                    ),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                ),
+
+                const Spacer(),
+
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withOpacity(0.75),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

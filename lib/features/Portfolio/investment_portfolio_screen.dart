@@ -1778,26 +1778,27 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
       scrollDirection: Axis.horizontal,
       child: DataTable(
         columnSpacing: 24,
-        headingRowHeight: 48,
+        headingRowHeight: 56,
         dataRowHeight: 60,
+        headingRowColor: MaterialStateProperty.all(const Color(0xFF0F172A)),
         headingTextStyle: const TextStyle(
-          color: Colors.white70,
+          color: Colors.white,
           fontWeight: FontWeight.w600,
-          fontSize: 12,
+          fontSize: 13,
         ),
         dataTextStyle: const TextStyle(
           color: Colors.white,
           fontSize: 12,
         ),
-        columns: const [
-          DataColumn(label: Text('')),
-          DataColumn(label: Text('Date')),
-          DataColumn(label: Text('Category')),
-          DataColumn(label: Text('Sub Category')),
-          DataColumn(label: Text('Owner')),
-          DataColumn(label: Text('Amount')),
-          DataColumn(label: Text('Comments')),
-          DataColumn(label: Text('Actions')),
+        columns: [
+          DataColumn(label: _buildHeaders('Select', Icons.check_box_outline_blank)),
+          DataColumn(label: _buildHeaders('Date', Icons.calendar_today)),
+          DataColumn(label: _buildHeaders('Category', Icons.category)),
+          DataColumn(label: _buildHeaders('Sub Category', Icons.layers)),
+          DataColumn(label: _buildHeaders('Owner', Icons.person)),
+          DataColumn(label: _buildHeaders('Amount', Icons.currency_rupee)),
+          DataColumn(label: _buildHeaders('Comments', Icons.comment)),
+          DataColumn(label: _buildHeaders('Actions', Icons.settings)),
         ],
         rows: investments.map((inv) {
           return DataRow(
@@ -1853,7 +1854,10 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               DataCell(
                 Text(
                   '₹${_formatNumber(inv.amount)}',
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF5B8CFF),
+                  ),
                 ),
               ),
 
@@ -1884,44 +1888,24 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
     );
   }
 
-  Widget _buildTableHeaderCell(String text) {
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Text(
-        text,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontWeight: FontWeight.w600,
-          fontSize: 12,
+  Widget _buildHeaders(String title, IconData icon) {
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 14,
+          color: const Color(0xFF5B8CFF),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTableCell(String text, {bool isBold = false, Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: color ?? Colors.white,
-          fontWeight: isBold ? FontWeight.w600 : FontWeight.normal,
-          fontSize: 12,
+        const SizedBox(width: 6),
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildTableActionButton({
-    required IconData icon,
-    required VoidCallback onPressed,
-    Color color = Colors.white70,
-  }) {
-    return IconButton(
-      icon: Icon(icon, color: color, size: 18),
-      onPressed: onPressed,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(),
+      ],
     );
   }
 
@@ -2577,7 +2561,25 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
               BarChartData(
                 alignment: BarChartAlignment.spaceAround,
                 maxY: provider.getMaxCategoryValue() * 1.2,
-                barTouchData: BarTouchData(enabled: false),
+
+                barTouchData: BarTouchData(
+                  enabled: true,
+                  handleBuiltInTouches: true,
+                  touchTooltipData: BarTouchTooltipData(
+                    tooltipBgColor: const Color(0xFF1A1F2E),
+                    tooltipRoundedRadius: 12,
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      return BarTooltipItem(
+                        '₹${_formatNumber(rod.toY)}',
+                        const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
                 titlesData: FlTitlesData(
                   show: true,
                   bottomTitles: AxisTitles(
@@ -2600,6 +2602,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                       },
                     ),
                   ),
+
                   leftTitles: AxisTitles(
                     sideTitles: SideTitles(
                       showTitles: true,
@@ -2614,19 +2617,24 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                       },
                     ),
                   ),
+
                   topTitles: AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
+
                   rightTitles: AxisTitles(
                     sideTitles: SideTitles(showTitles: false),
                   ),
                 ),
+
                 borderData: FlBorderData(
                   show: true,
                   border: Border.all(color: Colors.white.withOpacity(0.12)),
                 ),
+
                 barGroups: List.generate(allCategories.length, (index) {
                   final category = allCategories[index];
+
                   return BarChartGroupData(
                     x: index,
                     barRods: [
@@ -2643,7 +2651,6 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                         borderRadius: BorderRadius.circular(4),
                       ),
                     ],
-                    showingTooltipIndicators: [0, 1],
                   );
                 }),
               ),
@@ -2734,7 +2741,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
                 false);
       }
 
-      if (_selectedCategory != 'all' && inv.categoryId.toString() != _selectedCategory){
+      if (_selectedCategory != 'all' && inv.category != _selectedCategory){
         return false;
       }
       
@@ -2801,7 +2808,7 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
             if (mounted) {
               Navigator.pop(context);
 
-              _showSnackBar(
+              _showToast(
                 "Investment saved successfully",
                 isSuccess: true,
               );
@@ -2842,24 +2849,97 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
   }
 
   void _showRedemptionModal(Investment investment) {
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => RedemptionModal(
+      builder: (modalContext) => RedemptionModal(
+
         investment: investment,
-        onRedeem: (amount, notes) async {
-          await _provider.redeemInvestment(investment.id, amount, notes);
-          if (mounted) {
-            Navigator.pop(context);
-            _showSnackBar(
-              '₹${_formatNumber(amount)} redeemed successfully',
-              isSuccess: true,
-            );
-          }
-        },
+
+          onRedeem: (amount, notes) async {
+
+            Navigator.pop(context);   // close bottom sheet first
+
+            try {
+
+              await _provider.redeemInvestment(
+                investment.id,
+                amount,
+                notes,
+              );
+
+              await _provider.refreshData();   // 🔥 reload everything
+
+              if (!mounted) return;
+
+              _showToast(
+                '₹${_formatNumber(amount)} redeemed successfully',
+              );
+
+            } catch (e) {
+
+              if (!mounted) return;
+
+              _showToast(
+                "Redemption failed",
+                isSuccess: false,
+              );
+
+            }
+
+          },
+
       ),
     );
+
+  }
+
+  void _showToast(String message, {bool isSuccess = true}) {
+
+    final overlay = Overlay.of(context);
+
+    final overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 20,
+        left: 20,
+        right: 20,
+        child: Material(
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: isSuccess
+                  ? const Color(0xFF10B981)
+                  : const Color(0xFFEF4444),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 10,
+                ),
+              ],
+            ),
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    overlay.insert(overlayEntry);
+
+    Future.delayed(const Duration(seconds: 2), () {
+      overlayEntry.remove();
+    });
+
   }
 
   void _showInvestmentDetails(Investment investment) {
@@ -3313,15 +3393,23 @@ class _InvestmentPortfolioScreenState extends State<InvestmentPortfolioScreen>
     _showSnackBar('Export started', isSuccess: true);
   }
 
-  void _showSnackBar(String message, {bool isSuccess = true}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: isSuccess ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  void _showSnackBar(String message, {bool isSuccess = true, bool showOnTop = false}) {
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
+    final snackBar = SnackBar(
+      content: Text(message),
+      backgroundColor: isSuccess ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+      behavior: SnackBarBehavior.floating,
+      margin: showOnTop
+          ? const EdgeInsets.only(top: 60, left: 16, right: 16)
+          : const EdgeInsets.only(bottom: 20, left: 16, right: 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
       ),
     );
+
+    ScaffoldMessenger.of(context).showSnackBar(snackBar);
   }
 
   @override
